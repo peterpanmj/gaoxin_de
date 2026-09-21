@@ -4,7 +4,7 @@ A Principal Data Engineer interview project using Saleor as a synthetic commerce
 
 ## Status
 
-Design and source infrastructure configuration are available. Pipeline, dashboard and orchestration implementation are pending. The implementation budget is eight hours with AI assistance; documentation and demo preparation are separate.
+Design and source infrastructure configuration are available. Pipeline, dashboard and orchestration implementation are pending. Implementation is estimated at 8-14 hours with AI assistance, with no strict time limit. Documentation and demo preparation are separate.
 
 ## Project documentation
 

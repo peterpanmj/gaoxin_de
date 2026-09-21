@@ -1,8 +1,8 @@
-# Eight-Hour Principal Data Engineer Demo
+# Principal Data Engineer Demo Design
 
 ## Documentation requirements
 
-Document the implemented functionality from a data engineering perspective and explicitly map it to sections A-F of `Principal_Data_Engineer_Candidate_Take_Home.md`. All documentation, code comments, CLI help and dashboard text must be in English. Documentation and demo preparation are outside the eight-hour AI-assisted implementation budget.
+Document the implemented functionality from a data engineering perspective and explicitly map it to sections A-F of `Principal_Data_Engineer_Candidate_Take_Home.md`. All documentation, code comments, CLI help and dashboard text must be in English. Documentation and demo preparation are separate from the flexible 8-14 hour AI-assisted implementation estimate. There is no strict time limit.
 
 The README and supporting documentation must explain:
 
@@ -21,7 +21,7 @@ Provide a requirements traceability table linking each assessment section to con
 
 ## Accepted revision: Saleor order analytics
 
-This section supersedes the original event-source proposal and schedule below. The user selected Saleor as the source application. The eight hours cover AI-assisted implementation; documentation, demo preparation and presentation are outside that budget. Implementation tests and runtime verification remain inside it.
+This section supersedes the original event-source proposal and schedule below. The user selected Saleor as the source application. The current estimate is 8-14 hours of AI-assisted implementation, with no strict time limit; documentation, demo preparation and presentation are separate. Implementation tests and runtime verification remain inside it.
 
 - Source: the official Saleor Platform Docker Compose stack, including its dashboard and GraphQL API.
 - Local upstream checkout: `infra/saleor-platform`, revision `ab6315bd59c58b4815175df4c679107ff9695be4`.
@@ -64,9 +64,11 @@ Publication protocol: create `var/releases/<run_id>/analytics.duckdb`, load acce
 
 CI runs Python lint and focused tests, then a fixture-backed dbt build and publication integration checks before packaging. Production promotion remains a controlled gate. GitLab was the original example from the brief; the final repository host is not yet confirmed. The checks are independent of that hosting decision.
 
-### Revised implementation allocation
+### Earlier implementation allocation (superseded)
 
-| Budget | Implementation work |
+The current step estimates and commit requirements are in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). The following allocation is retained as historical context only.
+
+| Earlier estimate | Implementation work |
 |---|---|
 | 1 hour | Saleor startup, migrations, sample population, authentication and API smoke test |
 | 1 hour | Synthetic API seed scenario and paginated bronze extraction |
@@ -76,7 +78,7 @@ CI runs Python lint and focused tests, then a fixture-backed dbt build and publi
 | 0.75 hour | CI checks, pipeline entry point and operational metrics |
 | 0.75 hour | Integration buffer and fresh-environment verification |
 
-Write-up, architecture presentation and demo rehearsal are additional work outside this implementation allocation. The source startup spike has a 60-90 minute ceiling before reassessing technical blockers; switching sources is not automatic now that Saleor is selected.
+Write-up, architecture presentation and demo rehearsal are additional work outside this implementation allocation. Reassess source startup blockers after roughly 60-90 minutes without treating that checkpoint as a deadline; switching sources is not automatic now that Saleor is selected.
 
 ### Setup status
 
