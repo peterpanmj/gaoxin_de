@@ -1,0 +1,48 @@
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+# Generated data, reports and tool artifacts
+var/
+*.duckdb
+*.duckdb.wal
+dbt_packages/
+target/
+logs/
+node_modules/
+.coverage
+htmlcov/
+
+# Local ChatGPT / Codex configuration and agent instructions
+.codex/
+.chatgpt/
+.agents/
+AGENTS.md
+AGENTS.override.md
+CHATGPT.md
+CODEX.md
+
+# AI prompt logs and exported conversations
+prompt_logs/
+prompt-logs/
+chatgpt_logs/
+chatgpt-logs/
+codex_logs/
+codex-logs/
+chatgpt_exports/
+chatgpt-exports/
+codex_sessions/
+codex-sessions/
+*.prompt.log
+*.prompt.jsonl
+chatgpt-history.*
+codex-history.*
