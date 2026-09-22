@@ -4,6 +4,31 @@ Run commands from the repository root after `uv sync --frozen`. The Click entry
 point is `uv run saleor-analytics`. Use `--help` on any command for its assessment
 mapping and parameters. Global `--config PATH` comes before the command.
 
+## Python environment and command runner
+
+`uv` is Astral's Python project and package manager, not a Click command. It
+creates the project's `.venv`, installs the exact dependency versions recorded
+in `uv.lock`, and runs commands in that environment. Install it on Windows with:
+
+```powershell
+winget install --id=astral-sh.uv -e
+uv --version
+```
+
+`uv run saleor-analytics doctor` means: use this repository's managed Python
+environment, start the installed `saleor-analytics` executable, then pass
+`doctor` to the Click CLI. The execution path is:
+
+```text
+uv run -> saleor-analytics executable -> Click CLI -> Python pipeline modules
+```
+
+After `uv sync`, the equivalent Windows command is
+`./.venv/Scripts/saleor-analytics.exe doctor`; prefer `uv run` in documentation,
+CI and the demo because it reliably selects the project environment. In Git Bash,
+the same `uv run` commands work. Use `export ANALYTICS_ROOT=...` rather than the
+PowerShell `$env:ANALYTICS_ROOT = ...` form when setting environment variables.
+
 ## Mock-data ingestion walkthrough
 
 Use a fresh root so experiments cannot alter an earlier demonstration:
