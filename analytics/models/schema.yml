@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: orders
+    description: Current, trusted source version per Saleor order.
+    columns:
+      - name: order_id
+        data_tests: [not_null, unique]
+      - name: currency
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['USD', 'EUR', 'PLN']
+  - name: order_lines
+    columns:
+      - name: line_id
+        data_tests: [not_null, unique]
+      - name: order_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('orders')
+                field: order_id
+  - name: daily_order_metrics
+    description: Order metrics separated by date, channel and currency.

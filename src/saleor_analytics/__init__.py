@@ -1,0 +1,1 @@
+"""Saleor analytics data product."""

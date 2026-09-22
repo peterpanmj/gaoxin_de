@@ -1,0 +1,8 @@
+saleor_analytics:
+  target: candidate
+  outputs:
+    candidate:
+      type: duckdb
+      path: "{{ env_var('ANALYTICS_DATABASE_PATH') }}"
+      threads: 1
+      schema: analytics

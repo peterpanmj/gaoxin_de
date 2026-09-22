@@ -1,0 +1,9 @@
+# Paths are resolved relative to this configuration file.
+root = "../var"
+saleor_url = "http://localhost:8000/graphql/"
+page_size = 50
+timeout_seconds = 30
+max_attempts = 3
+reject_rate_limit = 0.05
+allow_mock = true
+
