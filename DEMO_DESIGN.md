@@ -1,6 +1,6 @@
 # Principal Data Engineer Demo Design
 
-> Design intent, not an implementation acceptance report. The [2026-09-22 assessment review](docs/ASSESSMENT_REVIEW.md) is the current source for verified coverage and gaps. Python duplicate collapse, conflict rejection, manifest-based publication, mock generation and CI gates described below are not all implemented. The old setup status and event-domain proposal are historical; Saleor was subsequently started and the happy path exercised.
+> Original design intent, including historical setup and event-domain proposals. Use the [modern DE guide](docs/MODERN_DE_DEMO.md) for current implemented behavior and the [verification report](docs/VERIFICATION.md) for tested evidence. The [assessment review](docs/ASSESSMENT_REVIEW.md) retains the earlier gap audit with a current closure update.
 
 ## Documentation requirements
 

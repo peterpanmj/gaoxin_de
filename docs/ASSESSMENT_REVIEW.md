@@ -1,3 +1,18 @@
+> **Historical audit with implementation update (2026-09-22).** The findings below
+> describe the earlier baseline. Publication bypass, missing DAG ordering,
+> duplicate/conflict handling, malformed-value quarantine and currency filtering
+> have now been corrected. Use [Modern DE demo](MODERN_DE_DEMO.md) for current
+> behavior and commands; the original findings remain for traceability.
+>
+> Current A-F coverage: A has versioned Bronze/Silver/Gold, replay lineage and
+> bounded incremental polling; B has the Click structured-file normalization,
+> deduplication and quarantine path; C has Python failure/recovery tests plus
+> 10 dbt data tests; D has ordered Airflow tasks, retries, publication/checkpoint
+> coupling and a freshness status command; E has GitHub PR/main validation and
+> an illustrative manual artifact-promotion job; F has runnable user/operations
+> guides and explicit limitations. Production approval settings, external alerts,
+> cloud IAM, hard-delete CDC, SCD2 and a 4 GB full-stack test are not implemented.
+> Mock generation runs locally through the CLI/DAG; it does not mutate Saleor.
 # Assessment coverage and implementation review
 
 Reviewed on 2026-09-22 against `Principal_Data_Engineer_Candidate_Take_Home.md`,

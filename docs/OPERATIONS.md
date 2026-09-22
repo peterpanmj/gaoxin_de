@@ -1,42 +1,85 @@
 # Operational design
 
-## Airflow
+## Execution and recovery
 
-`dags/saleor_analytics.py` is an illustrative daily DAG, not a deployed or runtime-verified workflow. The diagram below shows the intended sequence. The current DAG lacks an `extract -> transform_and_publish` dependency; both tasks depend only on `run_id`. Correct that edge before relying on scheduled execution. See the [assessment review](ASSESSMENT_REVIEW.md).
+Airflow runs `prepare -> extract_and_validate -> stage -> transform_and_test ->
+publish -> monitor`, with one active run and optional manual-only mock generation.
+The CLI can run independently. Local root/release locks serialize writes; a
+reader opens one immutable release. A pointer replacement commits data and the
+source watermark together. Validation, altered evidence and stale-base guards
+apply to direct publication as well as the combined build command.
 
-```mermaid
-flowchart LR
-    A[Saleor GraphQL] --> B[extract-saleor]
-    B --> C[Bronze snapshot and quarantine]
-    C --> D[build-warehouse]
-    D --> E[dbt models and tests]
-    E --> F[Atomic DuckDB publish]
-    F --> G[Dash dashboard]
-```
+A retry reuses its snapshot/release ID and persisted extraction window. Different
+content needs a new ID. Failed snapshots stay on disk but are not staged.
+Cross-snapshot conflicts fail dbt; an unpublished input can be excluded with an
+audited reason before corrected input is ingested. Published history cannot be
+silently excluded. Failed publication can be retried without rebuilding valid
+unchanged data. Monitoring failure occurs after publication and does not undo it.
 
-The HTTP client retries transient read failures. Extraction reaches file ingestion only after every page returns; validation then writes a passed or failed manifest. A paging failure does not trigger publication from that command. The DAG's missing dependency currently prevents it from guaranteeing the intended sequence. One active DAG run does not order tasks inside a run or serialize external CLI calls.
-
-Snapshot and release directories refuse reuse. Manual CLI replays require new IDs; Airflow retries reuse `ts_nodash` and may fail on an existing or incomplete directory. Retry/resume idempotency is not implemented. Warehouse rebuilds replay all approved normalized files, not raw files through a new validator.
-
-Historical logical dates do not constrain the source query: triggering an old date still reads current Saleor state. Supported local reprocessing is a rebuild of retained accepted history with a new release ID. True time-bounded or as-of backfills require an explicit source/history contract. In a larger deployment, isolate backfill compute and require validated promotion; the current direct `publish-candidate` command does not verify test evidence.
-
-Saleor's official `populatedb` command currently provides one-time synthetic bootstrap. The agreed CLI API scenarios and optional user-controlled mock generation inside Airflow remain unimplemented. The intended behavior is an explicit manual-trigger parameter, disabled for normal scheduled runs. `allow_mock` currently has no effect.
+See [the executable runbook](MODERN_DE_DEMO.md) for commands, Airflow setup,
+parameter examples and failure injection. Source mutations through Saleor API
+are not automated: bootstrap Saleor with its upstream tools or use local mock
+JSONL. A historical Airflow logical date does not reconstruct historical source
+state. Backfill means replaying retained accepted history into a new release.
 
 ## Freshness, observability and lineage
 
-Snapshot manifests record raw checksum, ingestion completion time (named `extracted_at`), counts, reject rate, contract label, and validation status. Silver keeps snapshot IDs; Gold can be related through its grouping keys. Complete release lineage is absent: releases do not record input inventories or retained test results, and replay does not verify checksums. Proposed production monitoring would export these as OpenTelemetry/OpenLineage events and alert when:
+Bronze manifests retain raw/accepted checksums, contract version, record/rejection/
+duplicate counts, duration and extraction bounds. Releases retain the complete
+input inventory, model checksums, dbt manifest/results/logs and database checksum.
+Silver retains snapshot ID and canonical payload hash. Trace Gold through its
+grouping keys and dbt dependencies to the selected Silver versions.
 
-- the successful snapshot is older than the 06:30 UTC freshness SLO;
-- reject rate exceeds the configured 5% threshold;
-- accepted record volume changes materially from the trailing baseline; or
-- dbt tests or the atomic publication step fail.
+The dashboard refreshes every 30 seconds and shows release, publication age and
+quality counts. `status --max-age-hours 24` exits nonzero for stale publication
+or extraction. Airflow exposes task failure; external alert delivery is not
+configured. Daily 06:00 UTC execution is configured; the proposed 06:30 UTC
+freshness objective is not an enforced end-to-end SLO. No completeness or volume
+anomaly monitor is claimed. Empty valid deltas can advance a checkpoint.
 
-No such alerts or exporters currently run. The 06:30 UTC SLO is a design target. The dashboard loads data once at startup and must restart to see a new publication. It does not show freshness, release ID or quality status.
+## Incremental processing and storage
 
-## Security and governance
+Polling uses Saleor updatedAt bounds with five-minute overlap and an upper bound
+five seconds behind the invocation clock. Windows persist across retries; only
+publication advances committed progress. This assumes synchronized clocks and
+mostly quiet synthetic data. Hard deletes, changes delayed beyond overlap and
+consistent source pagination require stronger production reconciliation/CDC.
 
-Saleor credentials come from `SALEOR_TOKEN` or runtime-only environment variables. Git ignores local data, `.env` files, Python environments and Codex/ChatGPT artifacts. The extractor selects no customer names, emails, addresses, or private metadata. Production access should use a read-only service account, TLS, encrypted storage, least-privilege warehouse roles, secret-manager injection, and audit logging for releases and dashboard access.
+The warehouse rebuilds retained accepted history. This simplifies replay and
+current-state correctness for the demo. It is not SQL MERGE, SCD2 or distributed
+processing. A separate benchmark compares equivalent JSON and Parquet queries
+and exposes monthly partition pruning. Production scale would motivate object
+storage, partition-aware incremental transformation and workload isolation.
 
-## Cost and scale
+## Security, governance and cost
 
-This demo chooses DuckDB because the source has tens of synthetic orders and the dashboard needs compact local aggregates. It replays immutable snapshots for clarity. At scale, Bronze becomes partitioned object storage, the version table becomes an incremental Iceberg/warehouse table clustered by `updated_at` and order ID, and dbt processes only changed partitions. Lifecycle rules expire raw and quarantine data according to policy; the dashboard reads Gold aggregates, never raw order payloads.
+Only synthetic data is allowed in this local demo. API projection omits customer
+identity and addresses, but arbitrary file input is preserved verbatim. Keep
+Bronze/quarantine access separate from Gold consumers. Runtime environment
+variables supply source credentials. Saleor development defaults are public
+local defaults, not deployable credentials. Airflow standalone is local-only.
+
+Production work includes secret-manager/IAM integration, TLS, encryption at rest,
+role-scoped Gold access, retention/deletion policy, backup/restore drills and
+auditable release permissions. Filesystem checksums detect accidental changes;
+they do not protect against an administrator altering code and evidence together.
+
+Single-node DuckDB and sequential Airflow limit resource usage and dependencies.
+The complete Saleor/Airflow/dashboard stack has not been acceptance-tested under
+4 GB RAM. Run components separately when memory is constrained; monitor Docker
+usage before promising that limit. No cloud cost estimate is represented as a
+measurement of this local project.
+
+## CI and promotion
+
+GitHub Actions validates PRs and main with formatting, lint, Python tests, real
+dbt integration tests and a built package. An explicit manual workflow input on
+main demonstrates promotion of the same artifact through a production environment.
+Configure required reviewers and branch protection in repository settings; YAML
+alone does not enable approval governance. The promotion job is a placeholder,
+not an actual deployment. GitLab CI is an alternative MR/default-branch example.
+
+Use short feature branches and clear A-F requirement labels in commits. GitFlow
+can be applied for multiple release lines; this small deliverable does not require
+long-lived develop/release branches. The original planned workflow is design
+context rather than evidence that repository protections have been configured.
