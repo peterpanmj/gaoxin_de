@@ -8,6 +8,11 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
+    """Nonsecret per-environment batch settings for assessment B/E/F.
+
+    allow_mock is reserved configuration; no implemented seed command uses it.
+    """
+
     root: Path
     saleor_url: str = "http://localhost:8000/graphql/"
     page_size: int = 50
@@ -18,6 +23,13 @@ class Settings:
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
+        """Read TOML, resolve storage and validate selected bounds (B/F).
+
+        TOML root is relative to the config file. A relative ANALYTICS_ROOT
+        override instead resolves from the process working directory. SALEOR_URL
+        overrides the endpoint. Parsing, unknown-key and validation errors
+        propagate to the caller; credentials are loaded separately by the client.
+        """
         path = path.resolve()
         with path.open("rb") as stream:
             values = tomllib.load(stream)

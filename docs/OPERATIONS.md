@@ -2,7 +2,7 @@
 
 ## Airflow
 
-`dags/saleor_analytics.py` defines a daily batch workflow:
+`dags/saleor_analytics.py` is an illustrative daily DAG, not a deployed or runtime-verified workflow. The diagram below shows the intended sequence. The current DAG lacks an `extract -> transform_and_publish` dependency; both tasks depend only on `run_id`. Correct that edge before relying on scheduled execution. See the [assessment review](ASSESSMENT_REVIEW.md).
 
 ```mermaid
 flowchart LR
@@ -14,20 +14,24 @@ flowchart LR
     F --> G[Dash dashboard]
 ```
 
-The extractor retries only read-only GraphQL queries. It writes a completed manifest only after every page is available; failed or partial extracts have no publish step. The DAG has one active run to keep release ordering simple. A re-run receives a new snapshot ID and replays all approved snapshots into a fresh candidate, so it never mutates a previous bronze extract.
+The HTTP client retries transient read failures. Extraction reaches file ingestion only after every page returns; validation then writes a passed or failed manifest. A paging failure does not trigger publication from that command. The DAG's missing dependency currently prevents it from guaranteeing the intended sequence. One active DAG run does not order tasks inside a run or serialize external CLI calls.
 
-For a backfill, trigger the DAG with an explicit logical date and a distinct run ID. Inspect the release candidate and dbt results before publishing it. In a larger deployment, run each backfill in an isolated compute pool and promote the candidate only after the normal data-quality gate succeeds.
+Snapshot and release directories refuse reuse. Manual CLI replays require new IDs; Airflow retries reuse `ts_nodash` and may fail on an existing or incomplete directory. Retry/resume idempotency is not implemented. Warehouse rebuilds replay all approved normalized files, not raw files through a new validator.
 
-The optional Saleor synthetic-data bootstrap is intentionally outside the scheduled DAG: initialize it once using the official `populatedb` command described in the README. This avoids accidental production-like data mutation during a scheduled analytics run. If a sandbox needs resettable seed data, add a separately permissioned Airflow task calling Saleor's management command with an explicit `seed=true` DAG parameter.
+Historical logical dates do not constrain the source query: triggering an old date still reads current Saleor state. Supported local reprocessing is a rebuild of retained accepted history with a new release ID. True time-bounded or as-of backfills require an explicit source/history contract. In a larger deployment, isolate backfill compute and require validated promotion; the current direct `publish-candidate` command does not verify test evidence.
+
+Saleor's official `populatedb` command currently provides one-time synthetic bootstrap. The agreed CLI API scenarios and optional user-controlled mock generation inside Airflow remain unimplemented. The intended behavior is an explicit manual-trigger parameter, disabled for normal scheduled runs. `allow_mock` currently has no effect.
 
 ## Freshness, observability and lineage
 
-The snapshot manifest records source checksum, extraction time, record counts, reject rate, contract version, and quality-gate status. These fields link each Gold model back to its Bronze snapshot. A production deployment exports them as OpenTelemetry/OpenLineage events and alerts when:
+Snapshot manifests record raw checksum, ingestion completion time (named `extracted_at`), counts, reject rate, contract label, and validation status. Silver keeps snapshot IDs; Gold can be related through its grouping keys. Complete release lineage is absent: releases do not record input inventories or retained test results, and replay does not verify checksums. Proposed production monitoring would export these as OpenTelemetry/OpenLineage events and alert when:
 
 - the successful snapshot is older than the 06:30 UTC freshness SLO;
 - reject rate exceeds the configured 5% threshold;
 - accepted record volume changes materially from the trailing baseline; or
 - dbt tests or the atomic publication step fail.
+
+No such alerts or exporters currently run. The 06:30 UTC SLO is a design target. The dashboard loads data once at startup and must restart to see a new publication. It does not show freshness, release ID or quality status.
 
 ## Security and governance
 

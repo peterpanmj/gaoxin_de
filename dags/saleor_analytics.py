@@ -2,6 +2,12 @@
 
 Deploy this file to an Airflow DAG folder after installing this package in the
 Airflow image. Credentials are injected by the runtime, never stored here.
+
+Assessment D: illustrative scheduling/retry configuration, not a verified
+operational DAG. Both tasks depend on run_id but there is currently no dependency
+from extract to transform_and_publish. ts_nodash is reused for retries and is not
+a historical extraction boundary. Monitoring and optional mock generation are
+not implemented. See docs/ASSESSMENT_REVIEW.md before using this as a demo.
 """
 
 from __future__ import annotations

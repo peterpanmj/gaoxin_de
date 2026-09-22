@@ -1,6 +1,6 @@
 # Saleor Analytics: Implementation Plan
 
-**Status:** Proposed implementation sequence. Pipeline development has not started.
+**Status:** Partially implemented. A source-to-warehouse happy path exists, but the verification gates and agreed scope below are not all complete. Checkboxes remain acceptance targets, not a count of absent code. See [ASSESSMENT_REVIEW.md](docs/ASSESSMENT_REVIEW.md) for the current evidence and repair priorities; the prior completion report overstated readiness.
 
 **Estimate:** Approximately 8-14 hours of AI-assisted implementation, including tests and integration verification. This is a planning range, not a deadline or hard cap. Complete the agreed scope and verification even if more time is needed. The final write-up and demo preparation are separate.
 

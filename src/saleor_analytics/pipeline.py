@@ -1,4 +1,9 @@
-"""File ingestion and DuckDB release-building primitives."""
+"""File parsing, quarantine and candidate storage for assessment A/B/C/D.
+
+These functions separate ingestion from dbt transformation and publication.
+Only the CLI build-warehouse sequence invokes all three in order; the publication
+primitive itself does not enforce test success. See docs/ASSESSMENT_REVIEW.md.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +29,17 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def ingest_jsonl(settings: Settings, input_path: Path, snapshot_id: str) -> dict[str, Any]:
-    """Persist an immutable input snapshot and its accepted/rejected contract results."""
+    """Read JSONL, normalize orders and persist Bronze/quarantine evidence (A/B/C).
+
+    Return a count/checksum manifest when nonempty input meets the reject-rate
+    threshold. JSON decoding errors and RecordError become rejected rows;
+    other exceptions propagate. A failed threshold writes a failed manifest
+    then raises RecordError. Missing input raises FileNotFoundError; existing
+    snapshot directories cannot be reused, including interrupted attempts.
+
+    Raw bytes are copied unchanged. Accepted/rejected rows accumulate in memory,
+    so this is a small-batch implementation. No record deduplication occurs here.
+    """
     snapshot_id = identifier(snapshot_id)
     if not input_path.is_file():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
@@ -82,7 +97,14 @@ def _all_accepted_snapshots(root: Path) -> list[tuple[str, Path]]:
 
 
 def build_candidate(settings: Settings, release_id: str) -> Path:
-    """Build an isolated DuckDB candidate from every quality-approved snapshot."""
+    """Load approved accepted JSONL into candidate staging tables (A/B/D).
+
+    Return releases/RELEASE_ID/analytics.duckdb; an existing release directory
+    fails rather than resuming. Retain every order/line version and snapshot ID
+    for subsequent dbt selection. This does not run dbt, deduplicate, produce
+    Gold tables or publish. Manifest status is trusted without rechecking hashes
+    or contract versions. release.json records only ID and creation time.
+    """
     release_id = identifier(release_id)
     candidate_dir = settings.root / "releases" / release_id
     candidate_dir.mkdir(parents=True, exist_ok=False)
@@ -138,7 +160,13 @@ def build_candidate(settings: Settings, release_id: str) -> Path:
 
 
 def publish_candidate(settings: Settings, database: Path) -> Path:
-    """Atomically replace the serving warehouse only after its build succeeds."""
+    """Copy a database and replace the serving file (A/D publication primitive).
+
+    Return the serving path. Successful same-directory replacement switches the
+    file; filesystem errors propagate. The caller owns quality validation and
+    writer serialization. This function does not verify dbt success, acquire a
+    lock, record release provenance or handle Windows open-reader conflicts.
+    """
     target = settings.root / "warehouse" / "analytics.duckdb"
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".next.duckdb")
@@ -148,7 +176,13 @@ def publish_candidate(settings: Settings, database: Path) -> Path:
 
 
 def run_dbt_build(database: Path) -> None:
-    """Run models and data tests against a candidate; raises without publishing on failure."""
+    """Execute dbt models and blocking data tests for a candidate (B/C/D).
+
+    Set ANALYTICS_DATABASE_PATH only in the child environment. Resolve analytics/
+    from the source checkout and require dbt on PATH. Nonzero dbt exits raise
+    subprocess.CalledProcessError; a missing executable raises FileNotFoundError.
+    This function never publishes and does not retain per-release test evidence.
+    """
     project_root = Path(__file__).resolve().parents[2]
     environment = os.environ | {"ANALYTICS_DATABASE_PATH": str(database.resolve())}
     subprocess.run(

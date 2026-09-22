@@ -1,4 +1,9 @@
-"""Validation and normalization for the Saleor order snapshot contract."""
+"""Python field validation and normalization for assessment B/C.
+
+The saleor-order-v1 label is written to manifests; it is not an input schema
+version negotiated here. Unknown fields are ignored. Relational uniqueness,
+accepted currencies and aggregate reconciliation are handled by dbt.
+"""
 
 from __future__ import annotations
 
@@ -71,7 +76,18 @@ class Order:
 
 
 def normalize_order(raw: Any) -> Order:
-    """Return a canonical order, rejecting malformed or incomplete source data."""
+    """Normalize a Saleor order into an analytical record (assessment B/C).
+
+    Convert timezone-aware timestamps to UTC, currency codes to uppercase and
+    monetary values to two-decimal strings. Require core fields, positive line
+    quantities and distinct line IDs within each order. Selected text fields are
+    coerced to strings; order duplicates are not collapsed by this function.
+
+    Known contract violations raise RecordError. Nested price/connection shapes
+    are not exhaustively checked and may raise AttributeError or Decimal errors.
+    Boolean quantities currently pass Python's int check. Status values,
+    timestamp ordering and line-to-order monetary reconciliation are not checked.
+    """
     if not isinstance(raw, dict):
         raise RecordError("record must be a JSON object")
     channel = raw.get("channel") or {}

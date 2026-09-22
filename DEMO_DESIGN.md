@@ -1,5 +1,7 @@
 # Principal Data Engineer Demo Design
 
+> Design intent, not an implementation acceptance report. The [2026-09-22 assessment review](docs/ASSESSMENT_REVIEW.md) is the current source for verified coverage and gaps. Python duplicate collapse, conflict rejection, manifest-based publication, mock generation and CI gates described below are not all implemented. The old setup status and event-domain proposal are historical; Saleor was subsequently started and the happy path exercised.
+
 ## Documentation requirements
 
 Document the implemented functionality from a data engineering perspective and explicitly map it to sections A-F of `Principal_Data_Engineer_Candidate_Take_Home.md`. All documentation, code comments, CLI help and dashboard text must be in English. Documentation and demo preparation are separate from the flexible 8-14 hour AI-assisted implementation estimate. There is no strict time limit.

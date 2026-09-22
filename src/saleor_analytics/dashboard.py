@@ -10,7 +10,13 @@ from dash import Dash, Input, Output, dcc, html
 
 
 def create_app(database: Path) -> Dash:
-    """Create a read-only dashboard backed only by published Gold models."""
+    """Load Gold aggregates once and construct the demo Dash app (A/F).
+
+    Reads the local analytics catalog/schema and closes the connection before
+    serving. This is a startup snapshot, not automatic release refresh. Current
+    KPI/product aggregations mix currencies and product rankings ignore channel
+    selection; use currency-separated SQL for validation pending those fixes.
+    """
     if not database.is_file():
         raise FileNotFoundError("Published warehouse not found; run build-warehouse first")
     connection = duckdb.connect(str(database), read_only=True)

@@ -33,7 +33,14 @@ query Orders($first: Int!, $after: String) {
 
 
 def extract_orders(settings: Settings, snapshot_id: str) -> dict:
-    """Fetch all current orders before committing a local immutable snapshot."""
+    """Extract paged orders, then invoke the JSONL ingestion boundary (A/B/D).
+
+    Authenticate via environment credentials and return ingest_jsonl's manifest.
+    Clean up the temporary file and HTTP client on success or failure. Paging
+    failures propagate before ingestion. This full scan assumes a quiet source:
+    no snapshot isolation, watermark, cursor-cycle detection or deletion handling
+    is implemented. No customer names, emails or addresses are selected.
+    """
     client = SaleorClient(settings)
     temporary_path: Path | None = None
     try:
