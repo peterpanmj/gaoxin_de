@@ -1,20 +1,46 @@
 """Python field validation and normalization for assessment B/C.
 
-The saleor-order-v1 label is written to manifests; it is not an input schema
-version negotiated here. Unknown fields are ignored. Relational uniqueness,
-accepted currencies and aggregate reconciliation are handled by dbt.
+The saleor-order-v2 contract is recorded and checked on replay. Unknown fields
+are ignored in normalized output and retained in raw input. Python checks field
+types and supported currencies; dbt checks relational and aggregate invariants.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import Any
 
 
 class RecordError(ValueError):
     """A source record violates the versioned pipeline contract."""
+
+
+CONTRACT_VERSION = "saleor-order-v2"
+STATUSES = {
+    "DRAFT",
+    "UNCONFIRMED",
+    "UNFULFILLED",
+    "PARTIALLY_FULFILLED",
+    "FULFILLED",
+    "PARTIALLY_RETURNED",
+    "RETURNED",
+    "CANCELED",
+    "EXPIRED",
+}
+
+
+def _object(value: Any, field: str) -> dict:
+    if not isinstance(value, dict):
+        raise RecordError(f"{field} must be an object")
+    return value
+
+
+def _text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RecordError(f"{field} must be a nonempty string")
+    return value.strip()
 
 
 def _required(value: Any, field: str) -> Any:
@@ -42,11 +68,11 @@ def _money(value: Any, field: str, currency: str) -> str:
         raise RecordError(f"{field} currency must match order currency")
     try:
         amount = Decimal(str(_required(value.get("amount"), f"{field}.amount")))
+        if not amount.is_finite() or amount < 0 or amount >= Decimal("1000000000000000"):
+            raise RecordError(f"{field}.amount must be finite and in [0, 10^15)")
+        return str(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
     except (InvalidOperation, ValueError) as exc:
         raise RecordError(f"{field}.amount must be numeric") from exc
-    if amount < 0:
-        raise RecordError(f"{field}.amount must be non-negative")
-    return str(amount.quantize(Decimal("0.01")))
 
 
 @dataclass(frozen=True)
@@ -76,17 +102,11 @@ class Order:
 
 
 def normalize_order(raw: Any) -> Order:
-    """Normalize a Saleor order into an analytical record (assessment B/C).
+    """Enforce the v2 order contract and return canonical data (assessment B/C).
 
-    Convert timezone-aware timestamps to UTC, currency codes to uppercase and
-    monetary values to two-decimal strings. Require core fields, positive line
-    quantities and distinct line IDs within each order. Selected text fields are
-    coerced to strings; order duplicates are not collapsed by this function.
-
-    Known contract violations raise RecordError. Nested price/connection shapes
-    are not exhaustively checked and may raise AttributeError or Decimal errors.
-    Boolean quantities currently pass Python's int check. Status values,
-    timestamp ordering and line-to-order monetary reconciliation are not checked.
+    Unknown fields are ignored; breaking required-field/type changes raise
+    RecordError. Normalize UTC timestamps, whitespace and two-place finite money.
+    Order totals need not equal line totals because shipping/discounts may differ.
     """
     if not isinstance(raw, dict):
         raise RecordError("record must be a JSON object")
@@ -97,10 +117,14 @@ def normalize_order(raw: Any) -> Order:
     if not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha():
         raise RecordError("channel.currencyCode must be a three-letter currency")
     currency = currency.upper()
+    if currency not in {"USD", "EUR", "PLN"}:
+        raise RecordError("currency must be USD, EUR or PLN")
     raw_lines = raw.get("lines") or []
     if isinstance(raw_lines, dict):
         raw_lines = raw_lines.get("edges") or raw_lines.get("nodes") or []
-        raw_lines = [item.get("node", item) for item in raw_lines]
+        if not isinstance(raw_lines, list):
+            raise RecordError("line connection must contain a list")
+        raw_lines = [_object(item, "line").get("node", item) for item in raw_lines]
     if not isinstance(raw_lines, list) or not raw_lines:
         raise RecordError("lines must contain at least one line")
 
@@ -109,39 +133,50 @@ def normalize_order(raw: Any) -> Order:
     for index, line in enumerate(raw_lines):
         if not isinstance(line, dict):
             raise RecordError(f"lines[{index}] must be an object")
-        line_id = _required(line.get("id"), f"lines[{index}].id")
+        line_id = _text(line.get("id"), f"lines[{index}].id")
         if not isinstance(line_id, str) or line_id in seen_line_ids:
             raise RecordError("line IDs must be unique strings")
         seen_line_ids.add(line_id)
         quantity = line.get("quantity")
-        if not isinstance(quantity, int) or quantity < 1:
+        if type(quantity) is not int or not 1 <= quantity <= 2147483647:
             raise RecordError(f"lines[{index}].quantity must be a positive integer")
         lines.append(
             OrderLine(
                 line_id=line_id,
-                product_name=str(_required(line.get("productName"), f"lines[{index}].productName")),
-                sku=line.get("productSku", line.get("variantSku")),
+                product_name=_text(line.get("productName"), f"lines[{index}].productName"),
+                sku=_text(line.get("productSku", line.get("variantSku")), "sku")
+                if line.get("productSku", line.get("variantSku")) is not None
+                else None,
                 quantity=quantity,
                 unit_amount=_money(
-                    line.get("unitPrice", {}).get("gross"),
+                    _object(line.get("unitPrice"), "unitPrice").get("gross"),
                     f"lines[{index}].unitPrice.gross",
                     currency,
                 ),
                 line_amount=_money(
-                    line.get("totalPrice", {}).get("gross"),
+                    _object(line.get("totalPrice"), "totalPrice").get("gross"),
                     f"lines[{index}].totalPrice.gross",
                     currency,
                 ),
             )
         )
+    created = _timestamp(raw.get("created"), "created")
+    updated = _timestamp(raw.get("updatedAt"), "updatedAt")
+    if datetime.fromisoformat(updated) < datetime.fromisoformat(created):
+        raise RecordError("updatedAt must not precede created")
+    status = _text(raw.get("status"), "status")
+    if status not in STATUSES:
+        raise RecordError("unsupported order status")
     return Order(
-        order_id=str(_required(raw.get("id"), "id")),
-        order_number=str(_required(raw.get("number"), "number")),
-        created_at=_timestamp(raw.get("created"), "created"),
-        updated_at=_timestamp(raw.get("updatedAt"), "updatedAt"),
-        status=str(_required(raw.get("status"), "status")),
-        channel=str(_required(channel.get("slug"), "channel.slug")),
+        order_id=_text(raw.get("id"), "id"),
+        order_number=_text(raw.get("number"), "number"),
+        created_at=created,
+        updated_at=updated,
+        status=status,
+        channel=_text(channel.get("slug"), "channel.slug"),
         currency=currency,
-        total_amount=_money((raw.get("total") or {}).get("gross"), "total.gross", currency),
-        lines=tuple(lines),
+        total_amount=_money(
+            _object(raw.get("total"), "total").get("gross"), "total.gross", currency
+        ),
+        lines=tuple(sorted(lines, key=lambda line: line.line_id)),
     )

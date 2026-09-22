@@ -18,6 +18,12 @@ dev = ["pytest>=8,<10", "ruff>=0.11", "build", "graphql-core>=3.2,<4"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/saleor_analytics"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"analytics/dbt_project.yml" = "saleor_analytics/dbt/dbt_project.yml"
+"analytics/profiles.yml" = "saleor_analytics/dbt/profiles.yml"
+"analytics/models" = "saleor_analytics/dbt/models"
+"analytics/tests" = "saleor_analytics/dbt/tests"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: executes dbt and publication"]

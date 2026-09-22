@@ -10,7 +10,7 @@ from pathlib import Path
 class Settings:
     """Nonsecret per-environment batch settings for assessment B/E/F.
 
-    allow_mock is reserved configuration; no implemented seed command uses it.
+    allow_mock permits only explicit synthetic-file generation, never source mutation.
     """
 
     root: Path

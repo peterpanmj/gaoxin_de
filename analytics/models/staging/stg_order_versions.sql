@@ -11,5 +11,6 @@ select
     updated_at,
     total_amount,
     payload_json,
+    payload_hash,
     snapshot_id
 from source

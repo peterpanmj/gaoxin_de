@@ -1,70 +1,117 @@
-"""A deliberately small Dash reader for the published gold-layer tables."""
+"""Currency-correct Gold reporting with release metadata (assessment A/F)."""
 
-from __future__ import annotations
-
-from pathlib import Path
+from datetime import UTC, datetime
 
 import duckdb
+import pandas as pd
 import plotly.express as px
 from dash import Dash, Input, Output, dcc, html
 
+from saleor_analytics.config import Settings
+from saleor_analytics.pipeline import published_database
 
-def create_app(database: Path) -> Dash:
-    """Load Gold aggregates once and construct the demo Dash app (A/F).
 
-    Reads the local analytics catalog/schema and closes the connection before
-    serving. This is a startup snapshot, not automatic release refresh. Current
-    KPI/product aggregations mix currencies and product rankings ignore channel
-    selection; use currency-separated SQL for validation pending those fixes.
-    """
-    if not database.is_file():
-        raise FileNotFoundError("Published warehouse not found; run build-warehouse first")
-    connection = duckdb.connect(str(database), read_only=True)
-    daily = connection.execute(
-        "select order_date, channel, currency, order_count, gross_amount, average_order_value "
-        "from analytics.analytics.daily_order_metrics order by order_date"
-    ).fetchdf()
-    products = connection.execute(
-        "select order_date, product_name, units_ordered, gross_amount "
-        "from analytics.analytics.daily_product_metrics"
-    ).fetchdf()
-    connection.close()
-    channels = sorted(daily["channel"].dropna().unique())
+def load_report(settings: Settings):
+    """Resolve one release once per refresh and read both models from it."""
+    path, pointer = published_database(settings)
+    with duckdb.connect(str(path), read_only=True) as connection:
+        daily = connection.sql("select * from analytics.analytics.daily_order_metrics").fetchdf()
+        products = connection.sql(
+            "select * from analytics.analytics.daily_product_metrics"
+        ).fetchdf()
+    return daily, products, pointer
+
+
+def filter_report(daily, products, currency, channels, start, end):
+    """Apply identical currency/channel/date selections to all metrics."""
+
+    def selected(frame):
+        mask = (frame.currency == currency) & frame.channel.isin(channels or [])
+        dates = pd.to_datetime(frame.order_date).dt.date
+        if start:
+            mask &= dates >= pd.Timestamp(start).date()
+        if end:
+            mask &= dates <= pd.Timestamp(end).date()
+        return frame.loc[mask].copy()
+
+    return selected(daily), selected(products)
+
+
+def create_app(settings: Settings) -> Dash:
+    daily, _, _ = load_report(settings)
+    currencies = sorted(daily.currency.unique())
+    channels = sorted(daily.channel.unique())
     app = Dash(__name__)
     app.layout = html.Main(
         [
-            html.H1("Saleor analytics demo"),
-            html.P("Synthetic local data. Gold-layer metrics are refreshed by the pipeline."),
-            dcc.Dropdown(channels, channels, id="channel-filter", multi=True),
+            html.H1("Saleor order analytics"),
+            html.P("Synthetic data. Gross order values exclude canceled and draft orders."),
+            dcc.Dropdown(
+                currencies, currencies[0] if currencies else None, id="currency", clearable=False
+            ),
+            dcc.Dropdown(channels, channels, id="channels", multi=True),
+            dcc.DatePickerRange(id="dates"),
+            dcc.Interval(id="refresh", interval=30000),
+            html.Pre(id="quality"),
             html.Div(id="kpis"),
-            dcc.Graph(id="revenue-trend"),
-            dcc.Graph(id="product-ranking"),
+            dcc.Graph(id="trend"),
+            dcc.Graph(id="products"),
         ],
         style={"maxWidth": "1100px", "margin": "auto", "fontFamily": "Arial"},
     )
 
     @app.callback(
         Output("kpis", "children"),
-        Output("revenue-trend", "figure"),
-        Output("product-ranking", "figure"),
-        Input("channel-filter", "value"),
+        Output("trend", "figure"),
+        Output("products", "figure"),
+        Output("quality", "children"),
+        Output("currency", "options"),
+        Output("channels", "options"),
+        Input("currency", "value"),
+        Input("channels", "value"),
+        Input("dates", "start_date"),
+        Input("dates", "end_date"),
+        Input("refresh", "n_intervals"),
     )
-    def update(selected_channels):
-        filtered = daily[daily["channel"].isin(selected_channels or channels)]
-        gross = filtered["gross_amount"].sum()
-        count = filtered["order_count"].sum()
+    def update(currency, selected_channels, start, end, _):
+        daily, products, pointer = load_report(settings)
+        currencies, channels = sorted(daily.currency.unique()), sorted(daily.channel.unique())
+        filtered, lines = filter_report(daily, products, currency, selected_channels, start, end)
+        total, count = filtered.gross_amount.sum(), int(filtered.order_count.sum())
         trend = px.line(
             filtered,
             x="order_date",
             y="gross_amount",
-            color="currency",
-            title="Daily gross revenue",
+            color="channel",
+            title=f"Daily gross order value ({currency})",
         )
-        ranked = products.groupby("product_name", as_index=False)["gross_amount"].sum()
-        ranked = ranked.nlargest(10, "gross_amount")
-        product_chart = px.bar(
-            ranked, x="gross_amount", y="product_name", orientation="h", title="Top products"
+        ranked = lines.groupby(
+            ["sku", "product_name"], dropna=False, as_index=False
+        ).gross_amount.sum()
+        bars = px.bar(
+            ranked.nlargest(10, "gross_amount"),
+            x="gross_amount",
+            y="product_name",
+            orientation="h",
+            title=f"Product gross value ({currency})",
         )
-        return html.H2(f"{count:,} orders · {gross:,.2f} gross revenue"), trend, product_chart
+        age = (datetime.now(UTC) - datetime.fromisoformat(pointer["published_at"])).total_seconds()
+        quality = (
+            f"Release: {pointer['release_id']} | published: {pointer['published_at']}\n"
+            f"Publication age: {age / 3600:.1f}h | "
+            f"{'STALE (>24h)' if age > 86400 else 'within 24h'}\n"
+            f"dbt tests passed: {pointer['data_tests_passed']} | "
+            f"input rejects: {pointer['rejected_count']} | "
+            f"duplicates collapsed: {pointer['duplicate_count']}\n"
+            "Fresh publication does not guarantee source completeness."
+        )
+        return (
+            html.H2(f"{count:,} orders | {currency or ''} {total:,.2f}"),
+            trend,
+            bars,
+            quality,
+            currencies,
+            channels,
+        )
 
     return app
