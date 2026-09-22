@@ -1,0 +1,4 @@
+# Teaching-only threshold: 1 rejected row out of 3 is allowed.
+# Use ANALYTICS_ROOT to keep each guide session isolated.
+root = "../var/mock-guide"
+reject_rate_limit = 0.34

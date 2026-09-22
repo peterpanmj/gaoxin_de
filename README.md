@@ -10,6 +10,7 @@ This is a synthetic, local commerce-analytics pipeline designed for the Principa
 
 ## Project documentation
 
+- [CLI user guide: mock data, ingestion, updates and quarantine](docs/CLI_USER_GUIDE.md)
 - [Design and assessment requirements](DEMO_DESIGN.md)
 - [Saleor setup](SALEOR_SETUP.md)
 - [Operational design, governance and cost](docs/OPERATIONS.md)
