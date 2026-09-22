@@ -48,3 +48,8 @@ chatgpt-history.*
 codex-history.*
 
 analytics/.user.yml
+
+# Local presentation artifacts
+.ppt-build/
+.chart-data-*/
+deliverables/*.pptx
