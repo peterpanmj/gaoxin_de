@@ -9,5 +9,6 @@ select
     quantity,
     unit_amount,
     line_amount,
+    payload_hash,
     snapshot_id
 from source

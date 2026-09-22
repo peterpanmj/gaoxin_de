@@ -1,0 +1,5 @@
+# Isolated synthetic runtime; credentials come from the environment.
+root = "/opt/data"
+saleor_url = "http://host.docker.internal:8000/graphql/"
+allow_mock = true
+reject_rate_limit = 0.05

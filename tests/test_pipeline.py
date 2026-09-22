@@ -52,5 +52,5 @@ def test_ingestion_quarantines_invalid_rows_and_builds_candidate(tmp_path: Path)
     connection = duckdb.connect(str(candidate), read_only=True)
     assert connection.execute("select count(*) from stg_order_versions").fetchone()[0] == 1
     connection.close()
-    target = publish_candidate(settings(tmp_path), candidate)
-    assert target.exists()
+    with pytest.raises(RecordError, match="validated"):
+        publish_candidate(settings(tmp_path), candidate)

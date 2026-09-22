@@ -1,6 +1,6 @@
 # Saleor Analytics: Implementation Plan
 
-**Status:** Proposed implementation sequence. Pipeline development has not started.
+**Status:** Historical planning checklist. Core reliability, incremental polling, mock generation, reporting, CI and Airflow runtime work is implemented. Checkboxes below are original acceptance targets rather than a live inventory. See [VERIFICATION.md](docs/VERIFICATION.md) for actual checks and [MODERN_DE_DEMO.md](docs/MODERN_DE_DEMO.md) for the current runbook and explicit boundaries.
 
 **Estimate:** Approximately 8-14 hours of AI-assisted implementation, including tests and integration verification. This is a planning range, not a deadline or hard cap. Complete the agreed scope and verification even if more time is needed. The final write-up and demo preparation are separate.
 

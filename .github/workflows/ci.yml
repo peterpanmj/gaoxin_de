@@ -1,0 +1,44 @@
+name: Validate and package
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: Exercise the illustrative production approval gate
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff format --check src tests dags
+      - run: uv run ruff check src tests dags
+      - name: Python invariants and fixture-backed dbt failure/recovery
+        run: uv run pytest -q
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-package-${{ github.sha }}
+          path: dist/
+          retention-days: 14
+  promote-example:
+    if: github.event_name == 'workflow_dispatch' && inputs.promote && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-package-${{ github.sha }}
+          path: dist
+      - name: Illustrative promotion only
+        run: echo 'Approved artifact downloaded. Configure a real deployment target before enabling deployment.'

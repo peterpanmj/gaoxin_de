@@ -1,78 +1,87 @@
 # Saleor Analytics Demo
 
-A Principal Data Engineer interview project using Saleor as a synthetic commerce source, Python and Click for ingestion, dbt and DuckDB for analytical modeling, and Plotly Dash for reporting.
+A Principal Data Engineer interview demo: Saleor GraphQL, a Python Click CLI,
+dbt, DuckDB, Airflow and Plotly Dash. All data is synthetic and all project
+content is in English.
 
-## What this demonstrates
+## Start here
 
-This is a synthetic, local commerce-analytics pipeline designed for the Principal Data Engineer take-home. It uses a real Saleor GraphQL source, but no real customer data. The required Python component is the `saleor-analytics` Click CLI. It extracts structured JSON, applies a versioned order contract, quarantines invalid records, writes immutable Bronze snapshots, builds a DuckDB candidate, runs dbt transformations and tests, and only then atomically publishes Gold tables for a Plotly Dash dashboard.
+- [Runnable modern DE demonstration](docs/MODERN_DE_DEMO.md): replay, updates,
+  incremental extraction, quarantine, Airflow and Parquet partition pruning.
+- [CLI user guide](docs/CLI_USER_GUIDE.md): commands and mock ingestion use cases.
+- [Assessment A-F review](docs/ASSESSMENT_REVIEW.md): requirements and remaining boundaries.
+- [Operations](docs/OPERATIONS.md) and [Saleor setup](SALEOR_SETUP.md).
+- [Original design](DEMO_DESIGN.md) and [implementation plan](IMPLEMENTATION_PLAN.md).
 
-## Project documentation
+## Quick start without Docker
 
-- [Design and assessment requirements](DEMO_DESIGN.md)
-- [Saleor setup](SALEOR_SETUP.md)
-- [Operational design, governance and cost](docs/OPERATIONS.md)
-
-## Clone
-
-```bash
-git clone --recurse-submodules https://github.com/peterpanmj/gaoxin_de.git
-cd gaoxin_de
-```
-
-For an existing clone:
-
-```bash
-git submodule update --init --recursive
-```
-
-The official Saleor Platform repository is pinned as a submodule under `infra/saleor-platform`. Its upstream development configuration is intended only for local synthetic-data use. Runtime data and local credentials must not be committed.
-
-All project documentation, code comments and user-facing text are in English.
-
-## Local run
-
-Prerequisites: Docker Desktop with at least 4 GB assigned, Python 3.12, and `uv`.
+Install Python 3.12 and uv, then run from this repository in PowerShell:
 
 ```powershell
-uv sync
-docker compose -f infra/saleor-platform/docker-compose.yml pull
-docker compose -f infra/saleor-platform/docker-compose.yml run --rm api python3 manage.py migrate
-docker compose -f infra/saleor-platform/docker-compose.yml run --rm api python3 manage.py populatedb --createsuperuser
-docker compose -f infra/saleor-platform/docker-compose.yml up -d
-
-$env:SALEOR_EMAIL = "admin@example.com"
-$env:SALEOR_PASSWORD = "admin"
-uv run saleor-analytics extract-saleor --snapshot-id saleor-initial-001
-uv run saleor-analytics build-warehouse --release-id release-initial-001
+uv sync --frozen
+$demoSession = [guid]::NewGuid().ToString('N')
+$env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/demo-$demoSession"
+uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/base.jsonl" --count 20
+uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/base.jsonl" --snapshot-id base
+uv run saleor-analytics build-warehouse --release-id base
+uv run saleor-analytics status
 uv run saleor-analytics dashboard
 ```
 
-The dashboard is served at `http://127.0.0.1:8050`. Saleor GraphQL is at `http://localhost:8000/graphql/`, and its local dashboard is at `http://localhost:9000`.
+Open http://localhost:8050. Expected: 20 orders, USD400 gross order value.
+Stop on an unexpected nonzero exit code. The mock generator creates local
+Saleor-shaped JSONL; it does not modify Saleor. For a real API source and Airflow,
+follow the linked guides. Clone with `--recurse-submodules` for the pinned
+upstream Saleor development stack.
 
-For a file-based contract demonstration, use `uv run saleor-analytics ingest-file INPUT.jsonl --snapshot-id example-001`. It expects the same Saleor order JSON shape selected by the extractor. Invalid rows remain in `var/quarantine/<snapshot-id>/`; a snapshot whose reject rate exceeds the configuration threshold fails before warehouse publication.
+## Architecture and guarantees
 
-## Repository map
-
-- `src/saleor_analytics/`: typed, testable Python extraction, validation, release and dashboard modules.
-- `analytics/`: dbt staging, Silver current-order and Gold aggregate models plus data tests.
-- `dags/`: Airflow workflow definition.
-- `infra/saleor-platform/`: pinned official Saleor submodule used only for synthetic local data.
-- `.gitlab-ci.yml`: merge-request validation and protected default-branch promotion skeleton.
-
-## Design choices and trade-offs
-
-Bronze preserves raw JSONL and a checksum-bearing manifest. Silver selects one current version per order, with deterministic tie-breaking. Gold has daily order and product metrics that make the dashboard cheap to query. This is a batch design with a daily target freshness. It is intentionally small: DuckDB and full snapshot replay optimize interview clarity and local reproducibility. `docs/OPERATIONS.md` describes the incremental object-storage/warehouse evolution.
-
-The contract requires identifiers, timezone-aware timestamps, positive line quantities, internally consistent money/currency, and unique line IDs. Python handles row-level reject/quarantine behavior; dbt enforces uniqueness, nullability, allowed currencies, relationships, and aggregate reconciliation. Failed Python validation or dbt tests blocks publication.
-
-No secrets or runtime data are committed. In production, use service-account credentials injected from a secret manager, source TLS, encryption at rest, role-scoped Gold access, and audited releases. The extractor deliberately omits PII fields from its selection set.
-
-## Validation
-
-```powershell
-uv run ruff check src tests
-uv run pytest -q
-uv run dbt build --project-dir analytics --profiles-dir analytics --target candidate
+```mermaid
+flowchart LR
+    A[Saleor API or mock JSONL] --> B[Python contract and deduplication]
+    B --> C[Bronze raw / accepted / manifest]
+    B --> Q[Quarantine]
+    C --> D[Isolated DuckDB candidate]
+    D --> E[dbt Silver and Gold plus 10 data tests]
+    E --> F[Validated immutable release]
+    F --> G[Atomic release and watermark pointer]
+    G --> H[Currency-filtered Dash reports]
 ```
 
-The dbt command needs `ANALYTICS_DATABASE_PATH` pointing to a candidate database; `saleor-analytics build-warehouse` sets it automatically.
+Same-input retries reuse snapshots; exact duplicates collapse; conflicting
+versions fail. Invalid rows are quarantined, with a configurable reject threshold.
+Current-state models select the complete latest order and line set. Both build
+and direct publication require checksum-bound dbt evidence. Failed validation
+or publication preserves the previously served release and source checkpoint.
+
+Incremental API polling uses `updatedAt`, persisted bounds and five-minute
+overlap. This is not log CDC: hard deletes and every intermediate mutation are
+not captured. dbt rebuilds from accepted history at this scale. The Parquet
+benchmark is a separate, reconciled experiment with observable partition pruning.
+
+Airflow orders preparation, ingestion, staging, dbt, publication and monitoring.
+Mock generation is optional and restricted to manual runs. Dash reloads one
+release every 30 seconds, with matching currency/channel/date filters for KPIs
+and charts. Gross order value excludes draft/canceled orders; it is not recognized
+revenue. No conversion or cross-currency total is implied.
+
+## Validation and delivery
+
+```powershell
+uv run ruff format --check src tests dags
+uv run ruff check src tests dags
+uv run pytest -q
+uv build
+```
+
+Tests include real dbt builds and publication-failure recovery. GitHub Actions
+validates pull requests and main; GitLab CI is an alternative example. The manual
+production environment job is a promotion illustration, not a deployed service;
+configure repository protection/reviewers separately. Runtime data, local secrets,
+and AI configuration/prompt logs are ignored by Git.
+
+The demo uses local filesystem locks, a single-node warehouse and environment
+secrets. HA, cloud IAM, external alert delivery, retention enforcement, source
+completeness guarantees and a 4 GB full-stack acceptance test remain outside
+implemented scope. Use a fresh data root for contract v2; legacy snapshots are
+not silently upgraded.

@@ -1,5 +1,7 @@
 # Principal Data Engineer Demo Design
 
+> Original design intent, including historical setup and event-domain proposals. Use the [modern DE guide](docs/MODERN_DE_DEMO.md) for current implemented behavior and the [verification report](docs/VERIFICATION.md) for tested evidence. The [assessment review](docs/ASSESSMENT_REVIEW.md) retains the earlier gap audit with a current closure update.
+
 ## Documentation requirements
 
 Document the implemented functionality from a data engineering perspective and explicitly map it to sections A-F of `Principal_Data_Engineer_Candidate_Take_Home.md`. All documentation, code comments, CLI help and dashboard text must be in English. Documentation and demo preparation are separate from the flexible 8-14 hour AI-assisted implementation estimate. There is no strict time limit.

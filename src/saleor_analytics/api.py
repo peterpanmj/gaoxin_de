@@ -13,6 +13,12 @@ class SourceError(RuntimeError):
 
 
 class SaleorClient:
+    """Credential-aware GraphQL transport with bounded read retries (A/B/D).
+
+    Environment proxy settings are disabled for the local source. Caller code
+    owns closing the HTTP client; no source mutation is automatically retried.
+    """
+
     def __init__(self, settings: Settings, transport=None, sleeper=time.sleep):
         self.settings = settings
         self.sleeper = sleeper
@@ -27,6 +33,13 @@ class SaleorClient:
         self.client.close()
 
     def execute(self, query: str, variables: dict | None = None, *, mutation=False) -> dict:
+        """Return GraphQL data or raise SourceError (assessment B/C/D).
+
+        Retry transport errors, HTTP 429 and 5xx up to max_attempts for reads.
+        Fail immediately on other HTTP failures, malformed JSON or GraphQL
+        errors. mutation=True limits execution to one attempt; query text is not
+        inspected to infer whether an operation mutates source state.
+        """
         attempts = 1 if mutation else self.settings.max_attempts
         for attempt in range(attempts):
             try:
@@ -55,6 +68,11 @@ class SaleorClient:
         raise SourceError("Source request exhausted")
 
     def authenticate(self):
+        """Use SALEOR_TOKEN or exchange runtime email/password for a token (A/F).
+
+        Tokens stay in the HTTP client's headers. Missing credentials and failed
+        token creation raise SourceError; no credentials are written to files.
+        """
         if "Authorization" in self.client.headers:
             return
         email, password = os.getenv("SALEOR_EMAIL"), os.getenv("SALEOR_PASSWORD")
