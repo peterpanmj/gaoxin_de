@@ -46,3 +46,5 @@ codex-sessions/
 *.prompt.jsonl
 chatgpt-history.*
 codex-history.*
+
+analytics/.user.yml
