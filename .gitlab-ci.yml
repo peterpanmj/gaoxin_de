@@ -1,5 +1,10 @@
 image: python:3.12-slim
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 stages:
   - lint
   - test
@@ -14,25 +19,25 @@ default:
 
 python_lint:
   stage: lint
-  script: uv run ruff check src tests
+  script:
+    - uv run ruff format --check src tests dags
+    - uv run ruff check src tests dags
 
 python_tests:
   stage: test
-  script: uv run pytest -q
+  script: uv run pytest -q -m "not integration"
 
-dbt_parse:
+dbt_quality:
   stage: data_quality
   variables:
     ANALYTICS_DATABASE_PATH: /tmp/analytics.duckdb
-  script: uv run dbt parse --project-dir analytics --profiles-dir analytics --target candidate
+  script: uv run pytest -q -m integration
 
 package:
   stage: package
   script: uv build
   artifacts:
     paths: [dist/]
-  rules:
-    - if: $CI_COMMIT_BRANCH
 
 promote_production:
   stage: promote
@@ -40,5 +45,6 @@ promote_production:
   environment:
     name: production
   when: manual
+  allow_failure: false
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

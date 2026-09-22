@@ -1,0 +1,27 @@
+services:
+  airflow:
+    build:
+      context: ../..
+      dockerfile: infra/airflow/Dockerfile
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTP_PROXY:-}
+    command: airflow standalone
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      ANALYTICS_ROOT: /opt/data
+      SALEOR_URL: http://host.docker.internal:8000/graphql/
+      SALEOR_TOKEN: ${SALEOR_TOKEN:-}
+      SALEOR_EMAIL: ${SALEOR_EMAIL:-}
+      SALEOR_PASSWORD: ${SALEOR_PASSWORD:-}
+    volumes:
+      - ../../dags:/opt/airflow/dags:ro
+      - airflow-home:/opt/airflow
+      - analytics-data:/opt/data
+volumes:
+  airflow-home:
+  analytics-data:
