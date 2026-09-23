@@ -24,6 +24,103 @@ rebuilds this small warehouse from retained accepted history. We demonstrate
 idempotent results without claiming SQL MERGE is required. Spark, log-based CDC,
 cloud IAM deployment and SCD2 remain deferred until justified by requirements.
 
+## Windows network setup with v2rayN
+
+Run host commands from `D:/gaoxin_de`. In Git Bash, enter the project with
+`cd /d/gaoxin_de`. The examples in this section use Git Bash; the rehearsal
+sections below use PowerShell unless labelled otherwise.
+
+With v2rayN listening on mixed port `10808`, use an HTTP proxy URL for both HTTP
+and HTTPS destinations. HTTPS traffic uses an HTTP CONNECT tunnel, so the
+`HTTPS_PROXY` value also starts with `http://`.
+
+```bash
+cd /d/gaoxin_de
+export HTTP_PROXY='http://127.0.0.1:10808'
+export HTTPS_PROXY="$HTTP_PROXY"
+export ALL_PROXY="$HTTP_PROXY"
+export http_proxy="$HTTP_PROXY"
+export https_proxy="$HTTPS_PROXY"
+export all_proxy="$ALL_PROXY"
+export NO_PROXY='localhost,127.0.0.1,::1,host.docker.internal'
+export no_proxy="$NO_PROXY"
+```
+
+These settings apply to this shell and its child processes. They keep local
+Saleor and Airflow requests direct. TUN mode may already route outbound traffic
+without explicit proxies; the block above selects the local mixed listener for
+tools that honor proxy variables. It does not configure Docker Desktop itself.
+Run it only while the listener is available.
+
+Git uses standard proxy variables or its `http.proxy` configuration.
+`GIT_HTTP_PROXY` and `GIT_HTTPS_PROXY` are not standard Git proxy controls.
+For a one-command override, use:
+
+```bash
+git -c http.proxy=http://127.0.0.1:10808 ls-remote origin HEAD
+```
+
+If a command reports connection attempts to an unexpected port, inspect the
+proxy variables in that same terminal and check `git config --show-origin
+--get-regexp proxy`. An agent's restricted execution environment can supply
+different proxy values from your interactive Git Bash session.
+
+### Docker pulls and image builds
+
+Docker Desktop manages image-pull networking separately. Keep its currently
+working proxy configuration. If pulls fail, open Docker Desktop's proxy settings
+and use the manual address `http://127.0.0.1:10808` for HTTP and HTTPS, or use
+the system proxy if Windows actually has that proxy configured. TUN mode alone
+does not imply a Windows system-proxy setting. Labels vary by Desktop version.
+
+For package downloads while building this project's Airflow image:
+
+```bash
+export BUILD_HTTP_PROXY='http://host.docker.internal:10808'
+docker compose -f infra/airflow/compose.yml build
+docker compose -f infra/airflow/compose.yml up -d
+```
+
+The Compose file passes `BUILD_HTTP_PROXY` as the build's `HTTP_PROXY` and
+`HTTPS_PROXY`. `host.docker.internal` reaches the Windows host from Docker;
+`127.0.0.1` inside a build container points to that container. These build
+arguments do not set the Airflow container's runtime proxy environment.
+If this address is unreachable from Docker, check the listener's bind address
+and firewall access from Docker's network before changing application code.
+
+PowerShell equivalents for dependency downloads and Docker builds:
+
+```powershell
+$env:HTTP_PROXY = 'http://127.0.0.1:10808'
+$env:HTTPS_PROXY = $env:HTTP_PROXY
+$env:ALL_PROXY = $env:HTTP_PROXY
+$env:NO_PROXY = 'localhost,127.0.0.1,::1,host.docker.internal'
+$env:BUILD_HTTP_PROXY = 'http://host.docker.internal:10808'
+```
+
+### Quick connectivity checks
+
+```bash
+curl --proxy http://127.0.0.1:10808 --connect-timeout 10 --max-time 20 \
+  -sS -o /dev/null -w 'Registry HTTP status: %{http_code}\n' \
+  https://registry-1.docker.io/v2/
+docker pull busybox:1.36.1
+docker run --rm busybox:1.36.1 echo container-ready
+uv sync --frozen
+uv run saleor-analytics doctor
+uv run pytest -q
+```
+
+An unauthenticated registry response of `401` confirms the endpoint responded;
+it does not indicate a failed proxy tunnel. `docker pull` independently checks
+Docker's registry access. A successful cached `uv sync` does not prove package
+download connectivity. Keep the proxy settings local rather than hardcoding
+this machine's port in the Dockerfile.
+
+References: [Docker build proxy arguments](https://docs.docker.com/build/building/variables/#proxy-arguments),
+[Docker Desktop proxy settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#proxies),
+and [Git proxy configuration](https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpproxy).
+
 ## Quick rehearsal: mock generation, replay and updates
 
 Use PowerShell at the repository root. Start a fresh root to keep the existing
