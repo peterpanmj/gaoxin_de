@@ -4,8 +4,14 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from saleor_analytics.common import atomic_json
 from saleor_analytics.config import Settings
-from saleor_analytics.pipeline import build_candidate, ingest_jsonl, publish_candidate
+from saleor_analytics.pipeline import (
+    build_candidate,
+    export_artifacts,
+    ingest_jsonl,
+    publish_candidate,
+)
 from saleor_analytics.records import RecordError, normalize_order
 
 
@@ -54,3 +60,56 @@ def test_ingestion_quarantines_invalid_rows_and_builds_candidate(tmp_path: Path)
     connection.close()
     with pytest.raises(RecordError, match="validated"):
         publish_candidate(settings(tmp_path), candidate)
+
+
+def test_export_artifacts_copies_release_and_source_evidence(tmp_path: Path):
+    project = settings(tmp_path / "analytics")
+    old_snapshot_id = "snapshot-000"
+    snapshot_id = "snapshot-001"
+    release_id = "release-001"
+    old_bronze = project.root / "bronze" / old_snapshot_id
+    old_bronze.mkdir(parents=True)
+    (old_bronze / "orders.raw.jsonl").write_text('{"source": "old"}\n')
+    (old_bronze / "orders.accepted.jsonl").write_text('{"source": "old"}\n')
+    (old_bronze / "manifest.json").write_text("{}")
+    bronze = project.root / "bronze" / snapshot_id
+    bronze.mkdir(parents=True)
+    (bronze / "orders.raw.jsonl").write_text('{"source": "raw"}\n')
+    (bronze / "orders.accepted.jsonl").write_text('{"source": "accepted"}\n')
+    (bronze / "manifest.json").write_text("{}")
+    quarantine = project.root / "quarantine" / snapshot_id
+    quarantine.mkdir(parents=True)
+    (quarantine / "orders.rejected.jsonl").write_text('{"error": "example"}\n')
+    extraction = project.root / "extractions" / snapshot_id
+    extraction.mkdir(parents=True)
+    (extraction / "request.json").write_text('{"mode": "incremental"}\n')
+    release = project.root / "releases" / release_id
+    release.mkdir(parents=True)
+    (release / "analytics.duckdb").write_text("demo database")
+    (release / "release.json").write_text(
+        json.dumps(
+            {
+                "release_id": release_id,
+                "inputs": [
+                    {"snapshot_id": old_snapshot_id, "extracted_at": "2026-01-01T00:00:00Z"},
+                    {"snapshot_id": snapshot_id, "extracted_at": "2026-01-02T00:00:00Z"},
+                ],
+            }
+        )
+    )
+    atomic_json(project.root / "warehouse/current.json", {"release_id": release_id})
+
+    result = export_artifacts(project, tmp_path / "exports")
+
+    bundle = Path(result["export_directory"])
+    assert (bundle / "releases" / release_id / "analytics.duckdb").exists()
+    assert (bundle / "bronze" / snapshot_id / "orders.raw.jsonl").exists()
+    assert (bundle / "quarantine" / snapshot_id / "orders.rejected.jsonl").exists()
+    assert (bundle / "extractions" / snapshot_id / "request.json").exists()
+    assert (bundle / "warehouse/current.json").exists()
+    assert not (bundle / "bronze" / old_snapshot_id).exists()
+    with pytest.raises(FileExistsError, match="already exists"):
+        export_artifacts(project, tmp_path / "exports")
+
+    full_result = export_artifacts(project, tmp_path / "exports-all", all_snapshots=True)
+    assert (Path(full_result["export_directory"]) / "bronze" / old_snapshot_id).exists()

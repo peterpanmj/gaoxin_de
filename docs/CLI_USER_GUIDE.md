@@ -109,6 +109,7 @@ expected totals.
 | `publish-candidate DATABASE` | Verify evidence and atomically commit release/checkpoint | C/D |
 | `build-warehouse --release-id ID` | Stage, validate and publish in one command | B/C/D |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot | A/C/D |
+| `export-artifacts [DESTINATION] [--release-id ID] [--all-snapshots]` | Copy a release and its latest Bronze, quarantine, extraction, and dbt evidence for review | A/F |
 | `status --max-age-hours 24` | Print release/count/freshness metadata; fail when stale | D/F |
 | `dashboard` | Query Gold with consistent currency/channel/date filters | A/F |
 
@@ -136,3 +137,28 @@ runtime environment. Source URL is the checkpoint identity; keep it stable.
 
 Raw files and quarantine may contain arbitrary input fields. Use synthetic data
 only. Files under `var/` are local runtime evidence and are not Git deliverables.
+
+## Export a review bundle
+
+After a successful publication, copy the active release and its latest source
+snapshot to a folder for inspection:
+
+```powershell
+uv run saleor-analytics export-artifacts
+```
+
+This creates `artifacts/<release-id>/` with the release DuckDB file, dbt evidence,
+the latest Bronze snapshot, related quarantine/extraction files, and
+`warehouse/current.json`. The command never overwrites an existing bundle. To
+export a specific historical or failed candidate, supply `--release-id RELEASE_ID`.
+Add `--all-snapshots` only when a reviewer needs complete source lineage.
+The DuckDB file contains the complete release state; the default bundle's single
+Bronze snapshot is not enough to rebuild that state from source.
+Pass `DESTINATION` to use another folder.
+
+For data produced by Airflow, the compose file maps `./artifacts` on the host to
+`/opt/artifacts` in the container. From `infra/airflow/`, run:
+
+```bash
+docker compose exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
+```
