@@ -81,6 +81,8 @@ The flow separates **preparing a candidate** from **publishing a release**. This
 | Gold | Daily order and product metrics. | Analysts and dashboard users | Aggregate only valid, accepted orders. |
 | Release metadata | Checksums, input inventory, dbt results, and timestamps. | Engineers and reviewers | Prove which inputs and tests produced a release. |
 
+The pipeline preserves the raw API payload in Bronze, then normalizes timestamps, money, strings, nested GraphQL structures, and field names into a controlled Silver contract.
+
 The primary Gold metric is **gross order value**. It is an operational measure of the source order total. It excludes `DRAFT` and `CANCELED` orders. It is not recognized revenue, net sales, payment settlement, or a cross-currency total.
 
 Currency is always a reporting dimension. USD, EUR, and other currencies are never added together without an explicit exchange-rate policy, which this demo does not implement.
