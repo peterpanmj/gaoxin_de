@@ -41,7 +41,6 @@ It is designed to show the decisions behind reliable data engineering, not to im
 - dbt transformations and data-quality tests.
 - Immutable release publication, a release pointer, and a Plotly Dash dashboard.
 - Airflow orchestration for the local demo and GitHub Actions quality checks.
-- A separate Parquet partition-pruning experiment.
 
 ### Deliberately not included
 
@@ -273,7 +272,6 @@ The project provides a Click CLI called `saleor-analytics`. It is the main local
 | `publish-candidate` | Publish a previously validated candidate after integrity checks. |
 | `status` | Show run, release, freshness, and lineage information. |
 | `dashboard` | Start the local Plotly Dash reporting interface. |
-| `benchmark-storage` | Run the isolated JSON-versus-partitioned-Parquet experiment. |
 
 Airflow models the operational dependency order:
 

@@ -111,7 +111,6 @@ expected totals.
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot | A/C/D |
 | `status --max-age-hours 24` | Print release/count/freshness metadata; fail when stale | D/F |
 | `dashboard` | Query Gold with consistent currency/channel/date filters | A/F |
-| `benchmark-storage --run-id ID --rows 120000` | Compare JSON/Parquet results, sizes and pruning | A/F |
 
 `build-warehouse --no-publish` validates without changing serving state. Paths for
 explicit validate/publish commands are `ROOT/releases/ID/analytics.duckdb`.
@@ -121,7 +120,7 @@ A stale candidate cannot replace a newer published release.
 ## Source, orchestration and troubleshooting
 
 The [modern DE guide](MODERN_DE_DEMO.md) contains executable full/incremental
-Saleor commands, Airflow manual trigger JSON, partition-pruning evidence and
+Saleor commands, Airflow manual trigger JSON and
 release inspection. Set `SALEOR_URL`, `SALEOR_EMAIL`, `SALEOR_PASSWORD` in the
 runtime environment. Source URL is the checkpoint identity; keep it stable.
 
