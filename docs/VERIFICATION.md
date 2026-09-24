@@ -39,7 +39,7 @@ prints an expected task traceback; the script succeeds only when failure and
 unchanged-publication assertions pass. No Saleor mutations are required.
 
 The executable [modern guide](MODERN_DE_DEMO.md) reproduces API polling, mock
-updates and the benchmark. Local logs, dbt artifacts and databases remain under
+updates and quality gates. Local logs, dbt artifacts and databases remain under
 ignored runtime directories or Docker volumes. Committed tests and scripts are
 the reproducible evidence; no secrets or raw real-world records are included.
 
@@ -47,7 +47,7 @@ the reproducible evidence; no secrets or raw real-world records are included.
 
 No log-based CDC, hard-delete capture, SQL incremental MERGE, SCD2, Spark cluster,
 cloud IAM deployment or source completeness guarantee is claimed. The main
-warehouse rebuilds accepted history; Parquet is a separate experiment. Mock
+warehouse rebuilds accepted history; Parquet export is not implemented. Mock
 generation writes local JSONL, not Saleor mutations. External alerts, repository
 approval settings, production deployment and a full-stack 4 GB acceptance run
 remain documented follow-on work.

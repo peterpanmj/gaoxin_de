@@ -16,7 +16,6 @@ malformed-input, reporting and DAG-ordering findings. All data is synthetic.
 | Currency-correct reporting | Currency selector; common channel/date filters | Every chart and KPI uses the same currency and release |
 | Observable data product | Counts, durations, checksums, source inventory, dbt artifacts, status command | Trace release -> snapshots -> raw files; show stale status |
 | Controlled orchestration | Serial Airflow tasks; manual-only optional mock generation | Generation on/off; failed validation blocks publication |
-| Efficient analytical files | Separate JSON/Parquet benchmark and monthly partitions | Reconciled sums and `Scanning Files: 1/12` |
 | Controlled delivery | GitHub Actions tests/build; illustrative protected promotion job | PR validation and main-only manual promotion example |
 
 Incremental extraction does not imply incremental transformation: dbt still
@@ -283,22 +282,16 @@ Retries reuse IDs and artifacts; deterministic validation errors still require
 corrected input/new IDs. Monitoring failure happens after publication and does
 not roll a successful release back.
 
-## Parquet and pruning experiment
+## Analytical storage and planned Parquet export
 
-```powershell
-uv run saleor-analytics benchmark-storage --run-id parquet-001 --rows 120000
-Get-Content "$env:ANALYTICS_ROOT/benchmarks/parquet-001/results.json"
-Get-Content "$env:ANALYTICS_ROOT/benchmarks/parquet-001/pruning-plan.txt"
-```
+Silver and Gold tables use DuckDB native storage. The standalone synthetic
+JSON/Parquet benchmark and its CLI command have been retired. Existing files
+under `var/modern-demo/benchmarks/` are historical, ignored local artifacts;
+the pipeline does not read them.
 
-This isolated experiment exports 120,000 deterministic rows as JSON and typed,
-ZSTD-compressed monthly Parquet partitions. Both queries return 10,000 rows and
-490,000.00 for month 1. Inspect `File Filters` and `Scanning Files: 1/12` in the
-actual plan. One local run measured 11,885,290 JSON bytes versus 133,908 Parquet
-bytes, with query durations around 0.111s and 0.028s respectively. Repeated
-synthetic values compress unusually well. Cache, query order and scale affect
-timings; these are observations, not a general performance guarantee. The main
-warehouse still uses DuckDB tables; this is not an Iceberg or Spark deployment.
+A future optional export will use validated warehouse tables and reconcile
+the exported Parquet data with its source release. This is not implemented yet.
+Parquet interoperability alone would not demonstrate Spark execution.
 
 ## Schema, history and security boundaries
 
@@ -323,7 +316,7 @@ an illustrative `production` environment gate with the same tested artifact.
 Configure required reviewers in repository environment settings; YAML alone does
 not establish approval policy. No real production deployment target is configured.
 
-A: layers, incremental/replay semantics, Parquet/pruning and lineage.
+A: layers, incremental/replay semantics and lineage.
 B: Click, structured files, normalization, deduplication and curated output.
 C: quarantine, contract/conflict tests and publication gates.
 D: ordered Airflow tasks, retries, checkpoints and freshness status.

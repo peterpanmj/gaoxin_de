@@ -7,7 +7,7 @@ content is in English.
 ## Start here
 
 - [Runnable modern DE demonstration](docs/MODERN_DE_DEMO.md): replay, updates,
-  incremental extraction, quarantine, Airflow and Parquet partition pruning.
+  incremental extraction, quarantine and Airflow.
 - [CLI user guide](docs/CLI_USER_GUIDE.md): commands and mock ingestion use cases.
 - [Assessment A-F review](docs/ASSESSMENT_REVIEW.md): requirements and remaining boundaries.
 - [Operations](docs/OPERATIONS.md) and [Saleor setup](SALEOR_SETUP.md).
@@ -56,8 +56,9 @@ or publication preserves the previously served release and source checkpoint.
 
 Incremental API polling uses `updatedAt`, persisted bounds and five-minute
 overlap. This is not log CDC: hard deletes and every intermediate mutation are
-not captured. dbt rebuilds from accepted history at this scale. The Parquet
-benchmark is a separate, reconciled experiment with observable partition pruning.
+not captured. dbt rebuilds from accepted history at this scale. Silver and Gold
+tables use DuckDB native storage. Exporting validated tables to Parquet for
+other analytical engines is planned, not implemented.
 
 Airflow orders preparation, ingestion, staging, dbt, publication and monitoring.
 Mock generation is optional and restricted to manual runs. Dash reloads one

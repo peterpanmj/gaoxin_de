@@ -11,7 +11,6 @@ from pathlib import Path
 
 import click
 
-from saleor_analytics.benchmark import benchmark_storage
 from saleor_analytics.config import Settings
 from saleor_analytics.dashboard import create_app
 from saleor_analytics.extract import extract_orders
@@ -207,16 +206,3 @@ def status(settings, max_age_hours):
     )
     if max(publication_age, extraction_age) > max_age_hours:
         raise click.ClickException("Freshness objective exceeded")
-
-
-@cli.command("benchmark-storage")
-@click.option("--run-id", required=True)
-@click.option("--rows", default=120000, type=click.IntRange(12000, 1000000))
-@click.pass_obj
-def benchmark(settings, run_id, rows):
-    """Measure JSON/Parquet size and show monthly partition pruning (A/F).
-
-    Generate isolated synthetic data under benchmarks/RUN_ID. Compare equal
-    query results and retain EXPLAIN ANALYZE evidence; do not assume a speedup.
-    """
-    click.echo(json.dumps(benchmark_storage(settings, run_id, rows), indent=2))

@@ -47,8 +47,8 @@ consistent source pagination require stronger production reconciliation/CDC.
 
 The warehouse rebuilds retained accepted history. This simplifies replay and
 current-state correctness for the demo. It is not SQL MERGE, SCD2 or distributed
-processing. A separate benchmark compares equivalent JSON and Parquet queries
-and exposes monthly partition pruning. Production scale would motivate object
+processing. Silver and Gold use DuckDB native storage; exporting validated
+tables to Parquet is planned. Production scale would motivate object
 storage, partition-aware incremental transformation and workload isolation.
 
 ## Security, governance and cost
