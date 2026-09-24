@@ -1,139 +1,123 @@
-# Saleor Analytics: Implementation Plan
+# Saleor Analytics: Implementation Plan and Delivery Status
 
-**Status:** Historical planning checklist. Core reliability, incremental polling, mock generation, reporting, CI and Airflow runtime work is implemented. Checkboxes below are original acceptance targets rather than a live inventory. See [VERIFICATION.md](docs/VERIFICATION.md) for actual checks and [MODERN_DE_DEMO.md](docs/MODERN_DE_DEMO.md) for the current runbook and explicit boundaries.
+**Status:** Core interview-demo scope implemented. This document records the
+delivered design, its verification evidence, and the remaining production work.
+It is not a time-boxed checklist. The implementation was planned for roughly
+8-14 hours of AI-assisted engineering; presentation preparation and the final
+write-up are separate work.
 
-**Estimate:** Approximately 8-14 hours of AI-assisted implementation, including tests and integration verification. This is a planning range, not a deadline or hard cap. Complete the agreed scope and verification even if more time is needed. The final write-up and demo preparation are separate.
+**Stack:** Saleor-compatible GraphQL extraction, local JSONL mock data, Python,
+Click, DuckDB, dbt, Plotly Dash, Airflow, Docker Compose, uv, and GitHub Actions.
 
-**Stack:** Saleor, Docker Compose, Python, Click, DuckDB, dbt, Plotly Dash, Airflow and GitHub Actions.
+## 1. Delivered scope
 
-## 1. Establish the runnable environment
+| Area | Status | Delivered behavior | Main evidence |
+|---|---|---|---|
+| Runtime environment | Implemented | Installable Python package, locked dependencies, local configuration, Docker Compose Airflow runtime. | `pyproject.toml`, `uv.lock`, `config/`, `infra/airflow/` |
+| Source ingestion | Implemented | Saleor GraphQL full/incremental extraction and local Saleor-shaped JSONL ingestion. | `src/saleor_analytics/extract.py`, `cli.py` |
+| Synthetic scenarios | Implemented | Deterministic `baseline`, `update`, `duplicate`, and `invalid` local JSONL scenarios; no mutation of Saleor. | `src/saleor_analytics/mock.py` |
+| Bronze and quarantine | Implemented | Raw and accepted JSONL, manifests, checksums, rejection evidence, and replayable snapshots. | `pipeline.py`, runtime `bronze/` and `quarantine/` |
+| Contract and normalization | Implemented | Controlled v2 order contract, UTC timestamps, decimal money, canonical line items, duplicate collapse, and conflict failure. | `records.py` |
+| DuckDB and dbt | Implemented | Candidate DuckDB warehouse, Silver current-state tables, Gold daily order/product metrics, dbt tests. | `analytics/`, `pipeline.py` |
+| Publication and lineage | Implemented | Immutable release directories and atomic `warehouse/current.json` pointer after dbt validation. | `pipeline.py` |
+| Orchestration | Implemented | Daily Airflow DAG with retries, manual mock controls, quality-gated publication, and freshness monitoring. | `dags/saleor_analytics.py` |
+| Dashboard | Implemented | Currency/channel/date filters, KPIs, Gold trend and product charts, release/quality status, single-day markers. | `dashboard.py` |
+| Artifact export | Implemented | CLI export of a release and latest snapshot by default; `--all-snapshots` exports full source lineage. | `export-artifacts` command |
+| CI | Implemented | PR/main formatting, linting, tests, package build, and package-artifact retention in GitHub Actions. | `.github/workflows/` |
+| CD example | Illustrative | Manual production-environment promotion job downloads a tested package; no deployment target is configured. | `.github/workflows/` |
 
-**Estimate: 60-105 minutes**
+## 2. Current end-to-end flow
 
-- [ ] Start Saleor and verify its API is accessible.
-- [ ] Initialize the Python package and Click CLI.
-- [ ] Add a dependency lock and environment-specific configuration.
+```text
+Saleor GraphQL or mock JSONL
+  → raw Bronze capture
+  → Python contract, normalization, deduplication, quarantine
+  → accepted Bronze snapshot and manifest
+  → isolated DuckDB candidate
+  → dbt Silver and Gold models plus data tests
+  → immutable validated release
+  → current.json pointer
+  → Dash dashboard and artifact export
+```
 
-**Verification gate:** Compose health checks pass; an authenticated GraphQL query succeeds; CLI help works; the package installs in a clean environment.
+Airflow invokes the same CLI boundaries in this order:
 
-## 2. Implement controlled synthetic-data scenarios
+```text
+prepare → extract_and_validate → stage → transform_and_test → publish → monitor
+```
 
-**Estimate: 60-105 minutes**
+Publication happens only after dbt validation succeeds. A failed run retains the
+previous release and its checkpoint for dashboard consumers.
 
-- [ ] Implement baseline seeding through supported Saleor API workflows.
-- [ ] Add order update, line removal and cancellation scenarios where supported by the installed API and order state.
-- [ ] Record scenario manifests and affected synthetic entity IDs.
-- [ ] Make retries avoid unintended duplicate source mutations.
+## 3. Validation and acceptance evidence
 
-**Verification gate:** Synthetic entities can be created and retrieved; scenario preconditions are checked; retries do not create unintended duplicates.
+The validation strategy is deliberately layered:
 
-## 3. Implement extraction and bronze snapshots
+| Layer | Checks |
+|---|---|
+| Python contract | Required fields, object shapes, UTC timestamps, finite money, supported currencies/statuses, positive quantities, and unique line IDs. |
+| Ingestion quality gate | Exact duplicates collapse; same-version differing payloads fail; invalid records quarantine; reject rate must remain within the configured limit. |
+| Artifact integrity | Contract version plus SHA-256 verification of raw and accepted snapshots. |
+| dbt | Keys, relationships, accepted currencies, line/order contracts, conflicting versions, and Gold-to-Silver metric reconciliation. |
+| Release gate | A candidate requires successful dbt results and matching checksums before publication. |
+| Operations | `status --max-age-hours 24` reports release/extraction freshness; Airflow records task outcomes and retries. |
+| CI | `ruff format --check`, `ruff check`, pytest, package build, and artifact upload for pull requests and `main`. |
 
-**Estimate: 60-105 minutes**
+Run the local checks with:
 
-- [ ] Extract paginated GraphQL data with timeouts and bounded retries.
-- [ ] Handle GraphQL errors even when HTTP returns success.
-- [ ] Write immutable JSONL snapshots and completion manifests.
+```bash
+uv sync --frozen
+uv run ruff format --check src tests dags
+uv run ruff check src tests dags
+uv run pytest -q
+uv build
+```
 
-**Verification gate:** Pagination completeness and error handling tests pass. Interrupted extraction never produces a snapshot marked complete.
+## 4. Presentation workflow
 
-## 4. Implement Python validation and staging
+The presentation environment uses an already published release in the Airflow
+`analytics-data` Docker volume. From Git Bash at the repository root:
 
-**Estimate: 45-75 minutes**
+```bash
+bash scripts/start_presentation_demo.sh
+```
 
-- [ ] Define and enforce the input contract.
-- [ ] Normalize money, timestamps and identifiers.
-- [ ] Handle exact duplicates and quarantine invalid records.
-- [ ] Load validated data into run-specific DuckDB staging tables.
+The launcher starts Airflow, repairs a stale Airflow webserver PID marker only
+when it is stale, waits for the Airflow UI, exports the active release if needed,
+and starts Dash from the exported release. It does not configure a proxy, pull
+images, generate data, or overwrite source history.
 
-**Verification gate:** Focused pytest cases cover money, timestamps, malformed records and duplicates. Input counts reconcile with accepted, duplicate and rejected records.
+Open:
 
-## 5. Build the dbt analytical warehouse
+```text
+Airflow: http://localhost:8081
+Dash:    http://localhost:8051
+```
 
-**Estimate: 90-165 minutes**
+See [CLI_USER_GUIDE.md](docs/CLI_USER_GUIDE.md),
+[MODERN_DE_DEMO.md](docs/MODERN_DE_DEMO.md), and
+[DEMO_DESIGN.md](DEMO_DESIGN.md) for the detailed walkthrough, runtime artifact
+paths, and business definitions.
 
-- [ ] Model current orders and their complete current line sets.
-- [ ] Build daily order and product metrics with explicit status and currency semantics.
-- [ ] Add model descriptions and dbt data tests.
+## 5. Deliberate boundaries and next work
 
-**Verification gate:** `dbt build` passes uniqueness, relationship, accepted-value, conflicting-version and monetary reconciliation checks. Changed orders and removed lines produce the expected analytical results.
+| Trigger or need | Next implementation step |
+|---|---|
+| More source volume | Move retained source data to object storage and process incremental partitions or Parquet files. |
+| Near-real-time updates or deletes | Use durable event/log CDC with tombstones; `updatedAt` polling cannot capture hard deletes or every intermediate mutation. |
+| Multiple consumers or large analytical workloads | Move the same dbt models to a managed warehouse or governed lakehouse. |
+| Full artifact reproducibility by default | Export all snapshots by default or make the export an atomic, locked copy operation. The current default export is an inspection bundle containing the latest snapshot. |
+| Automated deployment | Build and publish a versioned container image, configure a deployment target, and protect promotion with GitHub environment reviewers. |
+| Production security | Add IAM, secret management, encryption, retention controls, access auditing, and alert delivery. |
+| Stronger data observability | Add source completeness/reconciliation feeds, volume anomaly detection, external alerts, and an enforced end-to-end freshness SLO. |
 
-## 6. Implement validated publication and Dash
+## 6. Requirement traceability
 
-**Estimate: 60-105 minutes**
-
-- [ ] Promote candidate releases only after successful validation.
-- [ ] Build one read-only Dash page with filters, KPI cards and charts.
-- [ ] Display publication version/time and data-quality status.
-
-**Verification gate:** A failed build leaves the published release unchanged. Replay produces equivalent results. Dashboard values match gold queries and use one consistent release per refresh.
-
-## 7. Add Airflow orchestration
-
-**Estimate: 60-105 minutes**
-
-- [ ] Create one DAG with stage dependencies and shared run artifacts.
-- [ ] Expose optional, user-controlled mock generation through manual-trigger parameters.
-- [ ] Default mock generation to disabled and skip it for scheduled runs.
-- [ ] Configure bounded retries and serialized publication.
-
-**Verification gate:** The DAG imports successfully. Manual runs work with generation enabled and disabled. Failed quality gates block publication. Scheduled execution skips seeding.
-
-## 8. Add CI and perform acceptance testing
-
-**Estimate: 45-75 minutes**
-
-- [ ] Add GitHub Actions checks and package building.
-- [ ] Define an illustrative controlled promotion gate.
-- [ ] Complete integration fixes and verify repository state.
-
-**Verification gate:** Fresh setup, complete source-to-dashboard execution, repeat execution, order-change processing, deliberate failure and recovery all behave as documented. Git working tree is clean after committing changes.
-
-## Working rules
-
-- Click is the execution interface; Airflow invokes the same underlying functionality.
-- dbt owns most transformations and analytical assertions. Python tests cover ingestion and operational behavior.
-- Mock generation is optional and restricted to synthetic demo entities.
-- Failed validation preserves the previous published release for Dash consumers.
-- GitHub Actions stages map explicitly to the assessment's CI/CD requirements.
-- After each step, report changes, tests, results and limitations, then commit the coherent change using the assessment mapping below.
-- Resolve failed gates before proceeding to dependent work. Time allocations are targets, not permission to skip verification.
-
-## Commit messages and assessment traceability
-
-Map commits to the original `Principal_Data_Engineer_Candidate_Take_Home.md` using these section identifiers:
-
-- **A:** Data Architecture and Design.
-- **B:** Required Python Programming Assignment.
-- **C:** Data Quality, Contracts, and Testing.
-- **D:** Orchestration and Operational Design.
-- **E:** CI/CD and Delivery Practices.
-- **F:** README and Design Explanation.
-
-Use a concrete subject in the form `type(scope): describe the change [Req B,C]`. Include only directly relevant sections; do not tag every commit with every requirement.
-
-The commit body should explain the resulting behavior and why it matters, identify the specific assessment expectations addressed, and record relevant verification results or limitations. Never claim unexecuted tests passed. Keep commits coherent; split a step into multiple commits when its changes have separate purposes. Do not rewrite existing commits solely to apply this convention.
-
-Planned examples, to be adjusted to the actual implemented changes:
-
-1. `build(env): configure Saleor and installable pipeline CLI [Req A,B]`
-2. `feat(seed): add repeatable synthetic order scenarios [Req B,C]`
-3. `feat(ingest): persist complete paginated Saleor snapshots [Req A,B,D]`
-4. `feat(validate): normalize orders and quarantine invalid records [Req B,C]`
-5. `feat(dbt): build tested order and product marts [Req A,C]`
-6. `feat(publish): serve validated warehouse releases in Dash [Req A,C,D]`
-7. `feat(airflow): orchestrate pipeline with optional mock generation [Req D]`
-8. `ci(github): validate and package the pipeline before promotion [Req E]`
-9. `docs(assessment): map implementation evidence to deliverables [Req F]`
-
-## Separate documentation and demo work
-
-Separate from the implementation estimate:
-
-- [ ] Complete the requirements traceability for assessment sections A-F.
-- [ ] Document business metrics, model grains, contracts and source-to-report lineage.
-- [ ] Explain retry, replay, quarantine, publication and recovery behavior.
-- [ ] Document setup, CLI commands, orchestration, CI/CD, security, cost and production evolution.
-- [ ] Prepare and rehearse the interview walkthrough.
-
-All project content must be in English. Distinguish verified functionality, illustrative configuration, assumptions and future work.
+| Assessment area | Current repository evidence |
+|---|---|
+| A. Architecture and design | [DEMO_DESIGN.md](DEMO_DESIGN.md), `analytics/`, Bronze/Silver/Gold/release workflow. |
+| B. Python programming | `src/saleor_analytics/`, Click CLI, contract normalization, extraction, and tests. |
+| C. Quality and testing | Python contract checks, dbt models/tests, quarantine, integrity checks, and pytest. |
+| D. Orchestration and operations | `dags/saleor_analytics.py`, `infra/airflow/compose.yml`, freshness status command, and presentation launcher. |
+| E. CI/CD | `.github/workflows/`, locked dependency installation, automated validation, package build, and illustrative promotion job. |
+| F. Documentation | README, design, CLI guide, operations guide, modern demo guide, verification report, and this document. |

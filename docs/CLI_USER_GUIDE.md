@@ -162,3 +162,16 @@ For data produced by Airflow, the compose file maps `./artifacts` on the host to
 ```bash
 docker compose exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
 ```
+
+## Presentation launcher (Git Bash)
+
+After you have created and published a baseline release, run this from the
+repository root:
+
+```bash
+bash scripts/start_presentation_demo.sh
+```
+
+It starts Airflow, repairs a stale Airflow webserver PID marker when one exists,
+waits for the UI, exports the active release if needed, then starts Dash at
+`http://localhost:8051`. It does not configure networking or generate data.
