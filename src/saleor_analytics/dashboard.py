@@ -95,12 +95,20 @@ def create_app(settings: Settings) -> Dash:
         if filtered.empty:
             trend.add_annotation(
                 text="No data for these filters. Select a channel and adjust the dates.",
-                x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False,
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
             )
         elif filtered.order_date.nunique() == 1:
             trend.add_annotation(
                 text="One day of data available; each marker shows that day's total.",
-                x=0.5, y=1.1, xref="paper", yref="paper", showarrow=False,
+                x=0.5,
+                y=1.1,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
             )
         ranked = lines.groupby(
             ["sku", "product_name"], dropna=False, as_index=False
