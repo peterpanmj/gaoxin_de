@@ -172,6 +172,7 @@ repository root:
 bash scripts/start_presentation_demo.sh
 ```
 
-It starts Airflow, repairs a stale Airflow webserver PID marker when one exists,
+It starts Airflow, repairs a stale Airflow webserver PID marker when the marker
+does not belong to a running process,
 waits for the UI, exports the active release if needed, then starts Dash at
 `http://localhost:8051`. It does not configure networking or generate data.
