@@ -7,6 +7,7 @@ def test_help():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "doctor" in result.output
+    assert "export-artifacts" in result.output
 
 
 def test_invalid_configuration(tmp_path):

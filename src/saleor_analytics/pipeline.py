@@ -53,6 +53,75 @@ def published_database(settings: Settings) -> tuple[Path, dict]:
     return path, pointer
 
 
+def export_artifacts(
+    settings: Settings,
+    destination: Path,
+    release_id: str | None = None,
+    *,
+    all_snapshots: bool = False,
+) -> dict:
+    """Copy one release and selected input evidence into a review bundle (A/F)."""
+    pointer = current_release(settings)
+    selected_release_id = identifier(release_id) if release_id else pointer.get("release_id")
+    if not selected_release_id:
+        raise FileNotFoundError(
+            "No validated release; supply --release-id or publish a release first"
+        )
+    release_directory = settings.root / "releases" / selected_release_id
+    metadata_path = release_directory / "release.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Release metadata not found: {selected_release_id}")
+    metadata = read_json(metadata_path)
+    if metadata.get("release_id") != selected_release_id:
+        raise RecordError("Release metadata does not match requested release ID")
+
+    destination = destination.resolve()
+    root = settings.root.resolve()
+    if destination == root or root in destination.parents:
+        raise ValueError("Export destination must be outside the analytics root")
+    bundle = destination / selected_release_id
+    if bundle.exists():
+        raise FileExistsError(f"Export destination already exists: {bundle}")
+
+    shutil.copytree(release_directory, bundle / "releases" / selected_release_id)
+    inputs = metadata["inputs"]
+    selected_inputs = (
+        inputs if all_snapshots else [max(inputs, key=lambda item: item["extracted_at"])]
+    )
+    snapshot_ids = [item["snapshot_id"] for item in selected_inputs]
+    for snapshot_id in snapshot_ids:
+        source = settings.root / "bronze" / identifier(snapshot_id)
+        if not source.exists():
+            raise FileNotFoundError(f"Bronze evidence missing for snapshot: {snapshot_id}")
+        shutil.copytree(source, bundle / "bronze" / snapshot_id)
+        quarantine = settings.root / "quarantine" / snapshot_id
+        if quarantine.exists():
+            shutil.copytree(quarantine, bundle / "quarantine" / snapshot_id)
+        request = settings.root / "extractions" / snapshot_id / "request.json"
+        if request.exists():
+            target = bundle / "extractions" / snapshot_id
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(request, target / request.name)
+    if pointer.get("release_id") == selected_release_id:
+        target = bundle / "warehouse"
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(settings.root / "warehouse/current.json", target / "current.json")
+    atomic_json(
+        bundle / "export.json",
+        {
+            "release_id": selected_release_id,
+            "snapshot_ids": snapshot_ids,
+            "all_snapshots": all_snapshots,
+            "exported_at": now(),
+        },
+    )
+    return {
+        "export_directory": str(bundle),
+        "release_id": selected_release_id,
+        "snapshots": snapshot_ids,
+    }
+
+
 def verify_snapshot(directory: Path) -> dict:
     manifest = read_json(directory / "manifest.json")
     if manifest.get("contract_version") != CONTRACT_VERSION:

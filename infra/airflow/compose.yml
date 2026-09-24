@@ -14,6 +14,7 @@ services:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       ANALYTICS_ROOT: /opt/data
+      ARTIFACT_EXPORT_ROOT: /opt/artifacts
       SALEOR_URL: http://host.docker.internal:8000/graphql/
       SALEOR_TOKEN: ${SALEOR_TOKEN:-}
       SALEOR_EMAIL: ${SALEOR_EMAIL:-}
@@ -22,6 +23,7 @@ services:
       - ../../dags:/opt/airflow/dags:ro
       - airflow-home:/opt/airflow
       - analytics-data:/opt/data
+      - ../../artifacts:/opt/artifacts
 volumes:
   airflow-home:
   analytics-data:

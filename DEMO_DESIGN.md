@@ -83,6 +83,20 @@ The flow separates **preparing a candidate** from **publishing a release**. This
 
 The pipeline preserves the raw API payload in Bronze, then normalizes timestamps, money, strings, nested GraphQL structures, and field names into a controlled Silver contract.
 
+### Runtime artifacts
+
+`<analytics-root>` is `/opt/data` in the Airflow container. It is the configured local root when the CLI is run directly.
+
+| Result | Location | Notes |
+|---|---|---|
+| Bronze raw capture | `<analytics-root>/bronze/<snapshot-id>/orders.raw.jsonl` | The source record as received, one JSON object per line. |
+| Bronze accepted capture | `<analytics-root>/bronze/<snapshot-id>/orders.accepted.jsonl` | The validated, normalized records used to build the warehouse. |
+| Bronze manifest | `<analytics-root>/bronze/<snapshot-id>/manifest.json` | Record counts, checksums, contract version, and snapshot metadata. |
+| Silver tables | `<analytics-root>/releases/<release-id>/analytics.duckdb` | DuckDB tables `analytics.orders` and `analytics.order_lines`. |
+| Gold tables | `<analytics-root>/releases/<release-id>/analytics.duckdb` | DuckDB tables `analytics.daily_order_metrics` and `analytics.daily_product_metrics`. |
+| Active release pointer | `<analytics-root>/warehouse/current.json` | Identifies the validated release served by the dashboard and stores source watermarks. |
+| Review export bundle | `artifacts/<release-id>/` on the host | Default location created by `export-artifacts`; includes one release and its latest source evidence. |
+
 The primary Gold metric is **gross order value**. It is an operational measure of the source order total. It excludes `DRAFT` and `CANCELED` orders. It is not recognized revenue, net sales, payment settlement, or a cross-currency total.
 
 Currency is always a reporting dimension. USD, EUR, and other currencies are never added together without an explicit exchange-rate policy, which this demo does not implement.

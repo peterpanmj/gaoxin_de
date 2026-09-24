@@ -6,6 +6,7 @@ dbt owns relational models and data tests (C). Airflow invokes the same function
 """
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from saleor_analytics.mock import generate_mock
 from saleor_analytics.pipeline import (
     build_candidate,
     exclude_snapshot,
+    export_artifacts,
     ingest_jsonl,
     publish_candidate,
     published_database,
@@ -142,6 +144,35 @@ def exclude(settings, snapshot_id, reason):
     """
     exclude_snapshot(settings, snapshot_id, reason)
     click.echo(f"Excluded {snapshot_id}; raw evidence retained")
+
+
+@cli.command("export-artifacts")
+@click.argument("destination", required=False, type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--release-id", default=None, help="Release to export; defaults to the active release."
+)
+@click.option(
+    "--all-snapshots",
+    is_flag=True,
+    help="Include every source snapshot in the release, rather than only the latest one.",
+)
+@click.pass_obj
+def export_artifacts_command(settings, destination, release_id, all_snapshots):
+    """Copy release, Bronze, quarantine, and dbt evidence for review (A/F).
+
+    Creates DESTINATION/RELEASE_ID and never overwrites it. By default it copies
+    only the latest source snapshot. --all-snapshots copies the full lineage.
+    The active release includes warehouse/current.json; --release-id can export
+    an older or failed candidate for investigation. The destination must be
+    outside the analytics root so copied evidence cannot become pipeline input.
+    """
+    destination = destination or Path(os.getenv("ARTIFACT_EXPORT_ROOT", "artifacts"))
+    click.echo(
+        json.dumps(
+            export_artifacts(settings, destination, release_id, all_snapshots=all_snapshots),
+            indent=2,
+        )
+    )
 
 
 @cli.command("validate-candidate")
