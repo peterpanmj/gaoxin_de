@@ -124,7 +124,7 @@ This is polling, not full CDC. It cannot prove source completeness, infer hard d
 
 ## 8. Workflow an interviewer can follow
 
-The following sequence is the recommended live demonstration. Run either the PowerShell or Git Bash commands from the repository root; do not mix their environment-variable syntax in one terminal. Commands and fuller expected results are in the [CLI user guide](docs/CLI_USER_GUIDE.md) and [modern demo guide](docs/MODERN_DE_DEMO.md).
+The following sequence is the recommended live demonstration. Run either the PowerShell or Git Bash commands from the repository root; do not mix their environment-variable syntax in one terminal. Commands and fuller expected results are in the [PowerShell CLI guide](docs/CLI_USER_GUIDE_WINDOWS.md), [Git Bash CLI guide](docs/CLI_USER_GUIDE.md), and [modern demo guide](docs/MODERN_DE_DEMO.md).
 
 1. **Prepare an isolated demo session.** Create a new local data root so the rehearsal does not alter an earlier run.
 
@@ -338,7 +338,7 @@ The original Principal Data Engineer Candidate Take Home document is the accepta
 ## 14. Related documents
 
 - [Runnable modern demo](docs/MODERN_DE_DEMO.md) — setup, proxy guidance, commands, scenarios, and expected results.
-- [CLI user guide](docs/CLI_USER_GUIDE.md) — command reference and use cases.
+- [Git Bash CLI guide](docs/CLI_USER_GUIDE.md) and [PowerShell CLI guide](docs/CLI_USER_GUIDE_WINDOWS.md) — command reference and use cases.
 - [Operations guide](docs/OPERATIONS.md) — troubleshooting and operational notes.
 - [Verification report](docs/VERIFICATION.md) — executed checks and known limits.
 - [Implementation plan](IMPLEMENTATION_PLAN.md) — delivery history and planned work.

@@ -1,19 +1,59 @@
-# CLI user guide
+# CLI user guide (Git Bash)
 
-Run commands from the repository root after `uv sync --frozen`. The Click entry
+Run these commands in Git Bash from the repository root (`cd /d/gaoxin_de`).
+The Click entry
 point is `uv run saleor-analytics`. Use `--help` on any command for its assessment
 mapping and parameters. Global `--config PATH` comes before the command.
 
-## Python environment and command runner
+## Environment setup
+
+Install Python 3.12, uv, and Docker Desktop, and start Docker Desktop. Check
+that Git Bash can find each tool:
+
+```bash
+cd /d/gaoxin_de
+python --version
+uv --version
+docker version
+docker compose version
+```
+
+Install the locked Python dependencies and verify the CLI:
+
+```bash
+uv sync --frozen
+uv run saleor-analytics doctor
+```
+
+Local JSONL ingestion, warehouse builds, and Dash run on the host and do not
+require Docker. To run the Airflow DAG, build its image once and start Compose
+from the repository root:
+
+```bash
+docker compose -f infra/airflow/compose.yml build
+docker compose -f infra/airflow/compose.yml up -d
+docker compose -f infra/airflow/compose.yml ps
+```
+
+Open `http://localhost:8081` for Airflow. The Compose service stores pipeline
+data in its `analytics-data` Docker volume and maps the repository's
+`artifacts/` directory into the container. A local `ANALYTICS_ROOT` under
+`var/` is separate from that Docker volume. To stop Airflow while keeping the
+volume, run:
+
+```bash
+docker compose -f infra/airflow/compose.yml stop
+```
+
+If package downloads during image build require the local proxy, see the
+[network setup](MODERN_DE_DEMO.md#docker-pulls-and-image-builds). Docker
+Desktop's image-pull proxy is configured separately.
+
+## Python command runner
 
 `uv` is Astral's Python project and package manager, not a Click command. It
 creates the project's `.venv`, installs the exact dependency versions recorded
-in `uv.lock`, and runs commands in that environment. Install it on Windows with:
-
-```powershell
-winget install --id=astral-sh.uv -e
-uv --version
-```
+in `uv.lock`, and runs commands in that environment.
 
 `uv run saleor-analytics doctor` means: use this repository's managed Python
 environment, start the installed `saleor-analytics` executable, then pass
@@ -23,22 +63,17 @@ environment, start the installed `saleor-analytics` executable, then pass
 uv run -> saleor-analytics executable -> Click CLI -> Python pipeline modules
 ```
 
-After `uv sync`, the equivalent Windows command is
-`./.venv/Scripts/saleor-analytics.exe doctor`; prefer `uv run` in documentation,
-CI and the demo because it reliably selects the project environment. In Git Bash,
-the same `uv run` commands work. Use `export ANALYTICS_ROOT=...` rather than the
-PowerShell `$env:ANALYTICS_ROOT = ...` form when setting environment variables.
+Use `uv run` because it reliably selects this project's environment.
 
 ## Mock-data ingestion walkthrough
 
 Use a fresh root so experiments cannot alter an earlier demonstration:
 
-```powershell
-$demoSession = [guid]::NewGuid().ToString('N')
-$env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/guide-$demoSession"
+```bash
+export ANALYTICS_ROOT="$(pwd -W)/var/guide-$(date +%Y%m%d-%H%M%S)"
 uv run saleor-analytics doctor
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/base.jsonl" --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/base.jsonl" --snapshot-id base
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/base.jsonl" --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/base.jsonl" --snapshot-id base
 uv run saleor-analytics build-warehouse --release-id base
 uv run saleor-analytics status
 uv run saleor-analytics dashboard --port 8051
@@ -54,9 +89,9 @@ required structured-file Python ingestion path (B), independently of the API.
 Repeat ingestion with the same file and snapshot ID: the original manifest is
 returned. Different content cannot reuse that ID. To demonstrate duplicate rows:
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/duplicate.jsonl" --scenario duplicate --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/duplicate.jsonl" --snapshot-id duplicate
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/duplicate.jsonl" --scenario duplicate --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/duplicate.jsonl" --snapshot-id duplicate
 uv run saleor-analytics build-warehouse --release-id duplicate
 ```
 
@@ -66,9 +101,9 @@ versions; they are not the current business order count.
 
 ### Apply updated source state
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/update.jsonl" --scenario update --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/update.jsonl" --snapshot-id update
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/update.jsonl" --scenario update --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/update.jsonl" --snapshot-id update
 uv run saleor-analytics build-warehouse --release-id update
 ```
 
@@ -77,10 +112,15 @@ the complete current line set. Older arrivals cannot roll that order backward.
 
 ### Demonstrate quarantine and a failed batch
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/invalid.jsonl" --scenario invalid --count 2
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/invalid.jsonl" --snapshot-id invalid
-Get-Content "$env:ANALYTICS_ROOT/quarantine/invalid/orders.rejected.jsonl"
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/invalid.jsonl" --scenario invalid --count 2
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/invalid.jsonl" --snapshot-id invalid
+```
+
+The ingestion command is expected to fail. Inspect the rejected row with:
+
+```bash
+cat "$ANALYTICS_ROOT/quarantine/invalid/orders.rejected.jsonl"
 ```
 
 This intentionally exits nonzero: one invalid quantity among two rows exceeds
@@ -143,7 +183,7 @@ only. Files under `var/` are local runtime evidence and are not Git deliverables
 After a successful publication, copy the active release and its latest source
 snapshot to a folder for inspection:
 
-```powershell
+```bash
 uv run saleor-analytics export-artifacts
 ```
 
@@ -156,11 +196,11 @@ The DuckDB file contains the complete release state; the default bundle's single
 Bronze snapshot is not enough to rebuild that state from source.
 Pass `DESTINATION` to use another folder.
 
-For data produced by Airflow, the compose file maps `./artifacts` on the host to
-`/opt/artifacts` in the container. From `infra/airflow/`, run:
+For data produced by Airflow, Compose maps the repository's `artifacts/`
+directory to `/opt/artifacts` in the container. From the repository root, run:
 
 ```bash
-docker compose exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
+docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
 ```
 
 ## Presentation launcher (Git Bash)
