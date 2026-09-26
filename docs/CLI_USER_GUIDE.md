@@ -65,6 +65,70 @@ uv run -> saleor-analytics executable -> Click CLI -> Python pipeline modules
 
 Use `uv run` because it reliably selects this project's environment.
 
+## End-to-end demo flow
+
+```text
+Choose one source path for a run
+
+  A. Repeatable local demo                         B. Live Saleor demo
+     mock-data OUTPUT                                Saleor application
+         |                                              | GraphQL orders query
+         v                                              v
+     base.jsonl                                     extract-saleor --mode full
+         | ingest-file --snapshot-id base                | (later: incremental)
+         |                                              | captures orders.jsonl
+         |                                              |
+         +---------------------+------------------------+
+                               |
+                               v
+                    Validate and normalize orders
+                    - timestamps, money, strings, lines
+                    - collapse exact duplicates
+                    - quarantine invalid rows; fail on conflicting versions
+                               |
+                 +-------------+-------------+
+                 |                           |
+                 v                           v
+       bronze/<snapshot-id>/             quarantine/<snapshot-id>/
+       raw JSONL, accepted JSONL,        rejected JSONL (if any)
+       manifest and checksums
+                 |
+                 v
+          build-warehouse --release-id ID
+          (Airflow runs these stages separately)
+                 |
+                 +--> stage all accepted history in a candidate DuckDB file
+                 +--> dbt builds Silver orders/lines and Gold daily metrics
+                 +--> dbt tests contracts and reconciles metrics
+                 +--> publish only after validation succeeds
+                               |
+                               v
+                releases/<release-id>/analytics.duckdb
+                releases/<release-id>/release.json + dbt evidence
+                               |
+                               v
+                    warehouse/current.json
+                    (points to the active release)
+                               |
+                 +-------------+-------------+
+                 |             |             |
+                 v             v             v
+               status      dashboard    export-artifacts
+                            (Dash)      (review bundle)
+```
+
+`mock-data` writes the JSONL that `ingest-file` reads. For the live path,
+`extract-saleor` reads Saleor through GraphQL and captures its response before
+the same validation path; this project does not query Saleor's PostgreSQL
+database. The mock and Saleor paths use separate data roots during the demo.
+If validation or dbt tests fail, `warehouse/current.json` keeps pointing to
+the previous successful release.
+
+The daily Airflow DAG wraps the same commands as
+`prepare → extract_and_validate → stage → transform_and_test → publish → monitor`.
+Scheduled runs use Saleor extraction by default; a manual trigger can opt into
+mock data.
+
 ## Mock-data ingestion walkthrough
 
 Use a fresh root so experiments cannot alter an earlier demonstration:

@@ -4,6 +4,9 @@ Run these commands in PowerShell from the repository root (`D:\gaoxin_de`).
 For Git Bash syntax, use the [Git Bash guide](CLI_USER_GUIDE.md). The Python
 entry point is `uv run saleor-analytics`; `uv` manages the locked project
 environment and `saleor-analytics` is the Click CLI.
+The [end-to-end flow diagram](CLI_USER_GUIDE.md#end-to-end-demo-flow) shows
+where mock JSONL and Saleor GraphQL ingestion meet and how a release reaches
+Dash.
 
 ## Environment setup
 
