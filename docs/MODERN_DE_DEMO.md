@@ -25,8 +25,9 @@ cloud IAM deployment and SCD2 remain deferred until justified by requirements.
 
 ## Windows network setup with v2rayN
 
-Run host commands from `D:/gaoxin_de`. In Git Bash, enter the project with
-`cd /d/gaoxin_de`. The examples in this section use Git Bash; the rehearsal
+Run host commands from the repository root. In Git Bash, set
+`REPO_ROOT=/d/path/to/<repository-folder>` and enter the project with
+`cd "$REPO_ROOT"`. The examples in this section use Git Bash; the rehearsal
 sections below use PowerShell unless labelled otherwise.
 
 With v2rayN listening on mixed port `10808`, use an HTTP proxy URL for both HTTP
@@ -34,7 +35,8 @@ and HTTPS destinations. HTTPS traffic uses an HTTP CONNECT tunnel, so the
 `HTTPS_PROXY` value also starts with `http://`.
 
 ```bash
-cd /d/gaoxin_de
+export REPO_ROOT='/d/path/to/<repository-folder>'
+cd "$REPO_ROOT"
 export HTTP_PROXY='http://127.0.0.1:10808'
 export HTTPS_PROXY="$HTTP_PROXY"
 export ALL_PROXY="$HTTP_PROXY"

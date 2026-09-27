@@ -1,8 +1,8 @@
 # CLI user guide (Git Bash)
 
-Run these commands in Git Bash from the repository root (`cd /d/gaoxin_de`).
-The Click entry
-point is `uv run saleor-analytics`. Use `--help` on any command for its assessment
+Run these commands in Git Bash from the repository root. Set `REPO_ROOT` to
+your own clone location, then enter it. The Click entry point is
+`uv run saleor-analytics`. Use `--help` on any command for its assessment
 mapping and parameters. Global `--config PATH` comes before the command.
 
 ## Environment setup
@@ -11,7 +11,8 @@ Install Python 3.12, uv, and Docker Desktop, and start Docker Desktop. Check
 that Git Bash can find each tool:
 
 ```bash
-cd /d/gaoxin_de
+export REPO_ROOT="/d/path/to/<repository-folder>"
+cd "$REPO_ROOT"
 python --version
 uv --version
 docker version
@@ -110,11 +111,22 @@ Choose one source path for a run
                     warehouse/current.json
                     (points to the active release)
                                |
-                 +-------------+-------------+
-                 |             |             |
-                 v             v             v
-               status      dashboard    export-artifacts
-                            (Dash)      (review bundle)
+                 +-------------+----------------+
+                 |                              |
+                 v                              v
+       status --max-age-hours 24              dashboard
+       (daily DAG monitor task)                 (Dash)
+
+Manual review action, outside the daily DAG:
+
+  warehouse/current.json + active release
+                  |
+                  v
+          export-artifacts DESTINATION
+                  |
+                  v
+  artifacts/<review-name>/<release-id>/
+  portable DuckDB, dbt, Bronze, and quarantine evidence
 ```
 
 `mock-data` writes the JSONL that `ingest-file` reads. For the live path,
@@ -124,10 +136,11 @@ database. The mock and Saleor paths use separate data roots during the demo.
 If validation or dbt tests fail, `warehouse/current.json` keeps pointing to
 the previous successful release.
 
-The daily Airflow DAG wraps the same commands as
+The daily Airflow DAG wraps the production steps as
 `prepare → extract_and_validate → stage → transform_and_test → publish → monitor`.
 Scheduled runs use Saleor extraction by default; a manual trigger can opt into
-mock data.
+mock data. `export-artifacts` is intentionally outside this DAG because it
+copies an already-published release only for review, audit, or the demo.
 
 ## Mock-data ingestion walkthrough
 
@@ -244,28 +257,53 @@ only. Files under `var/` are local runtime evidence and are not Git deliverables
 
 ## Export a review bundle
 
-After a successful publication, copy the active release and its latest source
-snapshot to a folder for inspection:
+After the `base` release in the walkthrough is published, copy it and its
+latest source snapshot to a dated review directory outside `ANALYTICS_ROOT`:
 
 ```bash
-uv run saleor-analytics export-artifacts
+REVIEW_ROOT="$(pwd -W)/artifacts/review-$(date +%Y%m%d-%H%M%S)"
+uv run saleor-analytics export-artifacts "$REVIEW_ROOT"
+find "$REVIEW_ROOT" -maxdepth 5 -type f
 ```
 
-This creates `artifacts/<release-id>/` with the release DuckDB file, dbt evidence,
-the latest Bronze snapshot, related quarantine/extraction files, and
-`warehouse/current.json`. The command never overwrites an existing bundle. To
-export a specific historical or failed candidate, supply `--release-id RELEASE_ID`.
-Add `--all-snapshots` only when a reviewer needs complete source lineage.
-The DuckDB file contains the complete release state; the default bundle's single
-Bronze snapshot is not enough to rebuild that state from source.
-Pass `DESTINATION` to use another folder.
+For example, if `REVIEW_ROOT` resolves to
+`<repository-root>/artifacts/review-20260926-210000`, the `base` bundle is
+created under `<repository-root>/artifacts/review-20260926-210000/base/`. It
+contains:
+
+```text
+base/
+  export.json
+  warehouse/current.json
+  releases/base/analytics.duckdb
+  releases/base/release.json
+  releases/base/dbt/run_results.json
+  bronze/base/orders.raw.jsonl
+  bronze/base/orders.accepted.jsonl
+  bronze/base/manifest.json
+  quarantine/base/orders.rejected.jsonl
+```
+
+The command never overwrites an existing bundle. With no `DESTINATION`, it
+uses `artifacts/` and creates `artifacts/<release-id>/`. To export a specific
+historical or failed candidate, supply `--release-id RELEASE_ID`; a non-active
+release does not include `warehouse/current.json`. Add `--all-snapshots` when
+a reviewer needs complete source lineage. The DuckDB file contains the full
+release state; the default bundle's latest Bronze snapshot alone cannot
+rebuild it.
 
 For data produced by Airflow, Compose maps the repository's `artifacts/`
-directory to `/opt/artifacts` in the container. From the repository root, run:
+directory to `/opt/artifacts` in the container. From the repository root,
+use a destination visible on both sides of that mapping:
 
 ```bash
-docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
+REVIEW_NAME="review-$(date +%Y%m%d-%H%M%S)"
+docker compose -f infra/airflow/compose.yml exec airflow \
+  /opt/analytics/bin/saleor-analytics export-artifacts "/opt/artifacts/$REVIEW_NAME"
+find "artifacts/$REVIEW_NAME" -maxdepth 5 -type f
 ```
+
+The host bundle is `artifacts/$REVIEW_NAME/<active-release-id>/`.
 
 ## Presentation launcher (Git Bash)
 

@@ -1,7 +1,8 @@
 # CLI user guide (Windows PowerShell)
 
-Run these commands in PowerShell from the repository root (`D:\gaoxin_de`).
-For Git Bash syntax, use the [Git Bash guide](CLI_USER_GUIDE.md). The Python
+Run these commands in PowerShell from the repository root. Set `$repoRoot` to
+your own clone location first. For Git Bash syntax, use the
+[Git Bash guide](CLI_USER_GUIDE.md). The Python
 entry point is `uv run saleor-analytics`; `uv` manages the locked project
 environment and `saleor-analytics` is the Click CLI.
 The [end-to-end flow diagram](CLI_USER_GUIDE.md#end-to-end-demo-flow) shows
@@ -21,7 +22,8 @@ Open a new PowerShell terminal after installation. From the repository root,
 verify the tools, install locked dependencies, and check the CLI:
 
 ```powershell
-Set-Location D:\gaoxin_de
+$repoRoot = 'C:\path\to\<repository-folder>'
+Set-Location $repoRoot
 python --version
 uv --version
 docker version
@@ -156,8 +158,20 @@ docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/sale
 ```
 
 The export does not overwrite an existing bundle. It includes the DuckDB
-release, dbt evidence, and the latest Bronze snapshot. To view that release in
-Dash on the host, set the exported bundle as the data root:
+release, dbt evidence, and the latest Bronze snapshot.
+
+For a separate dated review copy, pass a destination inside the mapped
+`/opt/artifacts` directory. The bundle then appears under the host's
+`artifacts/<review-name>/<release-id>/`:
+
+```powershell
+$reviewName = 'review-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/saleor-analytics export-artifacts "/opt/artifacts/$reviewName"
+Get-ChildItem "artifacts/$reviewName" -Recurse -File
+```
+
+To view the default export in Dash on the host, set that bundle as the data
+root:
 
 ```powershell
 $releaseJson = docker compose -f infra/airflow/compose.yml exec -T airflow cat /opt/data/warehouse/current.json

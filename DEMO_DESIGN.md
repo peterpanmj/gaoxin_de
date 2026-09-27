@@ -139,7 +139,7 @@ The following sequence is the recommended live demonstration. Run either the Pow
    **Git Bash**
 
    ```bash
-   cd /d/gaoxin_de
+   cd /d/path/to/<repository-folder>
    uv sync --frozen
    export DEMO_SESSION="$(date +%Y%m%d-%H%M%S)"
    export ANALYTICS_ROOT="$(pwd -W)/var/interview-$DEMO_SESSION"
@@ -186,14 +186,14 @@ The following sequence is the recommended live demonstration. Run either the Pow
    **PowerShell, second terminal**
 
    ```powershell
-   $env:ANALYTICS_ROOT = 'D:\gaoxin_de\var\interview-<session-id-from-the-first-terminal>'
+   $env:ANALYTICS_ROOT = '<repository-root>\var\interview-<session-id-from-the-first-terminal>'
    ```
 
    **Git Bash, second terminal**
 
    ```bash
-   cd /d/gaoxin_de
-   export ANALYTICS_ROOT='D:/gaoxin_de/var/interview-<session-id-from-the-first-terminal>'
+   cd /d/path/to/<repository-folder>
+   export ANALYTICS_ROOT='<repository-root>/var/interview-<session-id-from-the-first-terminal>'
    ```
 
 4. **Show a safe retry.** Ingest a duplicate scenario. The source contains an extra repeated row, but reporting remains at 20 orders and USD 400.00.
