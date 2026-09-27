@@ -142,6 +142,65 @@ Scheduled runs use Saleor extraction by default; a manual trigger can opt into
 mock data. `export-artifacts` is intentionally outside this DAG because it
 copies an already-published release only for review, audit, or the demo.
 
+## What each layer produces
+
+`ANALYTICS_ROOT` is the data root selected for the run. A `snapshot-id` names
+one input capture; a `release-id` names one tested warehouse version, which
+can incorporate several accepted snapshots. The walkthrough happens to use
+`base` for both IDs, but they identify different artifacts.
+
+| Layer | Result under `ANALYTICS_ROOT` | What it means |
+|---|---|---|
+| Bronze | `bronze/<snapshot-id>/orders.raw.jsonl`, `orders.accepted.jsonl`, `manifest.json` | Retains the source payload, the normalized accepted rows, and counts/checksums for that ingestion. It is the replay and audit evidence. |
+| Quarantine | `quarantine/<snapshot-id>/orders.rejected.jsonl` | Holds rows that failed the input contract, with rejection details. It can be empty when all rows pass. Excessive rejection fails the ingestion quality gate. |
+| Silver | `orders` and `order_lines` tables inside `releases/<release-id>/analytics.duckdb` | Represents the latest valid version of each order and its matching current line set, with controlled fields and types. This is current state, not one row per historical version. |
+| Gold | `daily_order_metrics` and `daily_product_metrics` tables in the same DuckDB file | Aggregates eligible orders by date, channel, and currency; product metrics also group by SKU/name. Dash reads these tables. |
+| Published release | `releases/<release-id>/release.json`, dbt evidence, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
+
+For an Airflow run, Compose mounts its named `analytics-data` volume at
+`/opt/data` and sets `ANALYTICS_ROOT=/opt/data`. The paths in the table are
+relative to that mount. For example:
+
+```text
+analytics-data volume (mounted at /opt/data)
+  bronze/<snapshot-id>/orders.raw.jsonl
+  bronze/<snapshot-id>/orders.accepted.jsonl
+  bronze/<snapshot-id>/manifest.json
+  quarantine/<snapshot-id>/orders.rejected.jsonl
+  releases/<release-id>/analytics.duckdb  (Silver and Gold tables)
+  releases/<release-id>/release.json
+  releases/<release-id>/dbt/run_results.json
+  warehouse/current.json                  (active release pointer)
+```
+
+From Git Bash at the repository root, inspect the volume through the running
+container:
+
+```bash
+docker compose -f infra/airflow/compose.yml exec -T airflow ls /opt/data/bronze
+docker compose -f infra/airflow/compose.yml exec -T airflow ls /opt/data/releases
+docker compose -f infra/airflow/compose.yml exec -T airflow cat /opt/data/warehouse/current.json
+```
+
+Docker Desktop manages this named volume; it is not the host's `var/` folder.
+Host CLI runs use the `ANALYTICS_ROOT` you set in Git Bash. An explicit
+`export-artifacts` command copies selected evidence to the separate host
+`artifacts/` directory, which Compose mounts at `/opt/artifacts`.
+
+DuckDB is the physical warehouse file containing the staging, Silver, and Gold
+tables. Silver and Gold are logical model layers inside that file, not separate
+Parquet directories. `orders.raw.jsonl` remains the original source shape;
+`orders.accepted.jsonl` is the normalized contract used to rebuild the
+warehouse. The quarantine file is retained for inspection, not loaded into
+Silver or Gold.
+
+After the baseline walkthrough below, expect 20 accepted Bronze orders,
+20 current Silver orders, and USD400 in the Gold daily order metric. Use
+`uv run saleor-analytics status` to see the active release and its quality
+counts, then Dash to inspect Gold. The later `invalid --count 2` example
+creates a rejected row and fails its quality gate, so those results do not
+replace the published baseline or update release.
+
 ## Mock-data ingestion walkthrough
 
 Use a fresh root so experiments cannot alter an earlier demonstration:

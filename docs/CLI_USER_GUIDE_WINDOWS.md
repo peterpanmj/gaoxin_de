@@ -7,7 +7,9 @@ entry point is `uv run saleor-analytics`; `uv` manages the locked project
 environment and `saleor-analytics` is the Click CLI.
 The [end-to-end flow diagram](CLI_USER_GUIDE.md#end-to-end-demo-flow) shows
 where mock JSONL and Saleor GraphQL ingestion meet and how a release reaches
-Dash.
+Dash. The [layer results](CLI_USER_GUIDE.md#what-each-layer-produces) section
+explains the Bronze, quarantine, Silver, Gold, and DuckDB outputs for either
+shell.
 
 ## Environment setup
 
