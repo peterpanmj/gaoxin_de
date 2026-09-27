@@ -8,7 +8,7 @@ Start Docker Desktop with Linux containers and wait for the engine to become rea
 
 ## First startup
 
-From `D:\gaoxin_de\infra\saleor-platform`:
+From `<repository-root>\infra\saleor-platform`:
 
 ```powershell
 docker compose config --quiet

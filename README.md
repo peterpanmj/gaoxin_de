@@ -8,7 +8,8 @@ content is in English.
 
 - [Runnable modern DE demonstration](docs/MODERN_DE_DEMO.md): replay, updates,
   incremental extraction, quarantine and Airflow.
-- [CLI user guide](docs/CLI_USER_GUIDE.md): commands and mock ingestion use cases.
+- [CLI user guide for Git Bash](docs/CLI_USER_GUIDE.md): environment setup, commands, and mock ingestion use cases.
+- [CLI user guide for PowerShell](docs/CLI_USER_GUIDE_WINDOWS.md): the same workflow with Windows commands.
 - [Assessment A-F review](docs/ASSESSMENT_REVIEW.md): requirements and remaining boundaries.
 - [Operations](docs/OPERATIONS.md) and [Saleor setup](SALEOR_SETUP.md).
 - [Original design](DEMO_DESIGN.md) and [implementation plan](IMPLEMENTATION_PLAN.md).

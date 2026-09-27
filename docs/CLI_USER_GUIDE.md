@@ -1,19 +1,60 @@
-# CLI user guide
+# CLI user guide (Git Bash)
 
-Run commands from the repository root after `uv sync --frozen`. The Click entry
-point is `uv run saleor-analytics`. Use `--help` on any command for its assessment
+Run these commands in Git Bash from the repository root. Set `REPO_ROOT` to
+your own clone location, then enter it. The Click entry point is
+`uv run saleor-analytics`. Use `--help` on any command for its assessment
 mapping and parameters. Global `--config PATH` comes before the command.
 
-## Python environment and command runner
+## Environment setup
+
+Install Python 3.12, uv, and Docker Desktop, and start Docker Desktop. Check
+that Git Bash can find each tool:
+
+```bash
+export REPO_ROOT="/d/path/to/<repository-folder>"
+cd "$REPO_ROOT"
+python --version
+uv --version
+docker version
+docker compose version
+```
+
+Install the locked Python dependencies and verify the CLI:
+
+```bash
+uv sync --frozen
+uv run saleor-analytics doctor
+```
+
+Local JSONL ingestion, warehouse builds, and Dash run on the host and do not
+require Docker. To run the Airflow DAG, build its image once and start Compose
+from the repository root:
+
+```bash
+docker compose -f infra/airflow/compose.yml build
+docker compose -f infra/airflow/compose.yml up -d
+docker compose -f infra/airflow/compose.yml ps
+```
+
+Open `http://localhost:8081` for Airflow. The Compose service stores pipeline
+data in its `analytics-data` Docker volume and maps the repository's
+`artifacts/` directory into the container. A local `ANALYTICS_ROOT` under
+`var/` is separate from that Docker volume. To stop Airflow while keeping the
+volume, run:
+
+```bash
+docker compose -f infra/airflow/compose.yml stop
+```
+
+If package downloads during image build require the local proxy, see the
+[network setup](MODERN_DE_DEMO.md#docker-pulls-and-image-builds). Docker
+Desktop's image-pull proxy is configured separately.
+
+## Python command runner
 
 `uv` is Astral's Python project and package manager, not a Click command. It
 creates the project's `.venv`, installs the exact dependency versions recorded
-in `uv.lock`, and runs commands in that environment. Install it on Windows with:
-
-```powershell
-winget install --id=astral-sh.uv -e
-uv --version
-```
+in `uv.lock`, and runs commands in that environment.
 
 `uv run saleor-analytics doctor` means: use this repository's managed Python
 environment, start the installed `saleor-analytics` executable, then pass
@@ -23,22 +64,152 @@ environment, start the installed `saleor-analytics` executable, then pass
 uv run -> saleor-analytics executable -> Click CLI -> Python pipeline modules
 ```
 
-After `uv sync`, the equivalent Windows command is
-`./.venv/Scripts/saleor-analytics.exe doctor`; prefer `uv run` in documentation,
-CI and the demo because it reliably selects the project environment. In Git Bash,
-the same `uv run` commands work. Use `export ANALYTICS_ROOT=...` rather than the
-PowerShell `$env:ANALYTICS_ROOT = ...` form when setting environment variables.
+Use `uv run` because it reliably selects this project's environment.
+
+## End-to-end demo flow
+
+```text
+Choose one source path for a run
+
+  A. Repeatable local demo                         B. Live Saleor demo
+     mock-data OUTPUT                                Saleor application
+         |                                              | GraphQL orders query
+         v                                              v
+     base.jsonl                                     extract-saleor --mode full
+         | ingest-file --snapshot-id base                | (later: incremental)
+         |                                              | captures orders.jsonl
+         |                                              |
+         +---------------------+------------------------+
+                               |
+                               v
+                    Validate and normalize orders
+                    - timestamps, money, strings, lines
+                    - collapse exact duplicates
+                    - quarantine invalid rows; fail on conflicting versions
+                               |
+                 +-------------+-------------+
+                 |                           |
+                 v                           v
+       bronze/<snapshot-id>/             quarantine/<snapshot-id>/
+       raw JSONL, accepted JSONL,        rejected JSONL (if any)
+       manifest and checksums
+                 |
+                 v
+          build-warehouse --release-id ID
+          (Airflow runs these stages separately)
+                 |
+                 +--> stage all accepted history in a candidate DuckDB file
+                 +--> dbt builds Silver orders/lines and Gold daily metrics
+                 +--> dbt tests contracts and reconciles metrics
+                 +--> publish only after validation succeeds
+                               |
+                               v
+                releases/<release-id>/analytics.duckdb
+                releases/<release-id>/release.json + dbt evidence
+                               |
+                               v
+                    warehouse/current.json
+                    (points to the active release)
+                               |
+                 +-------------+----------------+
+                 |                              |
+                 v                              v
+       status --max-age-hours 24              dashboard
+       (daily DAG monitor task)                 (Dash)
+
+Manual review action, outside the daily DAG:
+
+  warehouse/current.json + active release
+                  |
+                  v
+          export-artifacts DESTINATION
+                  |
+                  v
+  artifacts/<review-name>/<release-id>/
+  portable DuckDB, dbt, Bronze, and quarantine evidence
+```
+
+`mock-data` writes the JSONL that `ingest-file` reads. For the live path,
+`extract-saleor` reads Saleor through GraphQL and captures its response before
+the same validation path; this project does not query Saleor's PostgreSQL
+database. The mock and Saleor paths use separate data roots during the demo.
+If validation or dbt tests fail, `warehouse/current.json` keeps pointing to
+the previous successful release.
+
+The daily Airflow DAG wraps the production steps as
+`prepare → extract_and_validate → stage → transform_and_test → publish → monitor`.
+Scheduled runs use Saleor extraction by default; a manual trigger can opt into
+mock data. `export-artifacts` is intentionally outside this DAG because it
+copies an already-published release only for review, audit, or the demo.
+
+## What each layer produces
+
+`ANALYTICS_ROOT` is the data root selected for the run. A `snapshot-id` names
+one input capture; a `release-id` names one tested warehouse version, which
+can incorporate several accepted snapshots. The walkthrough happens to use
+`base` for both IDs, but they identify different artifacts.
+
+| Layer | Result under `ANALYTICS_ROOT` | What it means |
+|---|---|---|
+| Bronze | `bronze/<snapshot-id>/orders.raw.jsonl`, `orders.accepted.jsonl`, `manifest.json` | Retains the source payload, the normalized accepted rows, and counts/checksums for that ingestion. It is the replay and audit evidence. |
+| Quarantine | `quarantine/<snapshot-id>/orders.rejected.jsonl` | Holds rows that failed the input contract, with rejection details. It can be empty when all rows pass. Excessive rejection fails the ingestion quality gate. |
+| Silver | `orders` and `order_lines` tables inside `releases/<release-id>/analytics.duckdb` | Represents the latest valid version of each order and its matching current line set, with controlled fields and types. This is current state, not one row per historical version. |
+| Gold | `daily_order_metrics` and `daily_product_metrics` tables in the same DuckDB file | Aggregates eligible orders by date, channel, and currency; product metrics also group by SKU/name. Dash reads these tables. |
+| Published release | `releases/<release-id>/release.json`, dbt evidence, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
+
+For an Airflow run, Compose mounts its named `analytics-data` volume at
+`/opt/data` and sets `ANALYTICS_ROOT=/opt/data`. The paths in the table are
+relative to that mount. For example:
+
+```text
+analytics-data volume (mounted at /opt/data)
+  bronze/<snapshot-id>/orders.raw.jsonl
+  bronze/<snapshot-id>/orders.accepted.jsonl
+  bronze/<snapshot-id>/manifest.json
+  quarantine/<snapshot-id>/orders.rejected.jsonl
+  releases/<release-id>/analytics.duckdb  (Silver and Gold tables)
+  releases/<release-id>/release.json
+  releases/<release-id>/dbt/run_results.json
+  warehouse/current.json                  (active release pointer)
+```
+
+From Git Bash at the repository root, inspect the volume through the running
+container:
+
+```bash
+docker compose -f infra/airflow/compose.yml exec -T airflow ls /opt/data/bronze
+docker compose -f infra/airflow/compose.yml exec -T airflow ls /opt/data/releases
+docker compose -f infra/airflow/compose.yml exec -T airflow cat /opt/data/warehouse/current.json
+```
+
+Docker Desktop manages this named volume; it is not the host's `var/` folder.
+Host CLI runs use the `ANALYTICS_ROOT` you set in Git Bash. An explicit
+`export-artifacts` command copies selected evidence to the separate host
+`artifacts/` directory, which Compose mounts at `/opt/artifacts`.
+
+DuckDB is the physical warehouse file containing the staging, Silver, and Gold
+tables. Silver and Gold are logical model layers inside that file, not separate
+Parquet directories. `orders.raw.jsonl` remains the original source shape;
+`orders.accepted.jsonl` is the normalized contract used to rebuild the
+warehouse. The quarantine file is retained for inspection, not loaded into
+Silver or Gold.
+
+After the baseline walkthrough below, expect 20 accepted Bronze orders,
+20 current Silver orders, and USD400 in the Gold daily order metric. Use
+`uv run saleor-analytics status` to see the active release and its quality
+counts, then Dash to inspect Gold. The later `invalid --count 2` example
+creates a rejected row and fails its quality gate, so those results do not
+replace the published baseline or update release.
 
 ## Mock-data ingestion walkthrough
 
 Use a fresh root so experiments cannot alter an earlier demonstration:
 
-```powershell
-$demoSession = [guid]::NewGuid().ToString('N')
-$env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/guide-$demoSession"
+```bash
+export ANALYTICS_ROOT="$(pwd -W)/var/guide-$(date +%Y%m%d-%H%M%S)"
 uv run saleor-analytics doctor
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/base.jsonl" --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/base.jsonl" --snapshot-id base
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/base.jsonl" --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/base.jsonl" --snapshot-id base
 uv run saleor-analytics build-warehouse --release-id base
 uv run saleor-analytics status
 uv run saleor-analytics dashboard --port 8051
@@ -54,9 +225,9 @@ required structured-file Python ingestion path (B), independently of the API.
 Repeat ingestion with the same file and snapshot ID: the original manifest is
 returned. Different content cannot reuse that ID. To demonstrate duplicate rows:
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/duplicate.jsonl" --scenario duplicate --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/duplicate.jsonl" --snapshot-id duplicate
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/duplicate.jsonl" --scenario duplicate --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/duplicate.jsonl" --snapshot-id duplicate
 uv run saleor-analytics build-warehouse --release-id duplicate
 ```
 
@@ -66,9 +237,9 @@ versions; they are not the current business order count.
 
 ### Apply updated source state
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/update.jsonl" --scenario update --count 20
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/update.jsonl" --snapshot-id update
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/update.jsonl" --scenario update --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/update.jsonl" --snapshot-id update
 uv run saleor-analytics build-warehouse --release-id update
 ```
 
@@ -77,10 +248,15 @@ the complete current line set. Older arrivals cannot roll that order backward.
 
 ### Demonstrate quarantine and a failed batch
 
-```powershell
-uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/invalid.jsonl" --scenario invalid --count 2
-uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/invalid.jsonl" --snapshot-id invalid
-Get-Content "$env:ANALYTICS_ROOT/quarantine/invalid/orders.rejected.jsonl"
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/invalid.jsonl" --scenario invalid --count 2
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/invalid.jsonl" --snapshot-id invalid
+```
+
+The ingestion command is expected to fail. Inspect the rejected row with:
+
+```bash
+cat "$ANALYTICS_ROOT/quarantine/invalid/orders.rejected.jsonl"
 ```
 
 This intentionally exits nonzero: one invalid quantity among two rows exceeds
@@ -140,28 +316,53 @@ only. Files under `var/` are local runtime evidence and are not Git deliverables
 
 ## Export a review bundle
 
-After a successful publication, copy the active release and its latest source
-snapshot to a folder for inspection:
-
-```powershell
-uv run saleor-analytics export-artifacts
-```
-
-This creates `artifacts/<release-id>/` with the release DuckDB file, dbt evidence,
-the latest Bronze snapshot, related quarantine/extraction files, and
-`warehouse/current.json`. The command never overwrites an existing bundle. To
-export a specific historical or failed candidate, supply `--release-id RELEASE_ID`.
-Add `--all-snapshots` only when a reviewer needs complete source lineage.
-The DuckDB file contains the complete release state; the default bundle's single
-Bronze snapshot is not enough to rebuild that state from source.
-Pass `DESTINATION` to use another folder.
-
-For data produced by Airflow, the compose file maps `./artifacts` on the host to
-`/opt/artifacts` in the container. From `infra/airflow/`, run:
+After the `base` release in the walkthrough is published, copy it and its
+latest source snapshot to a dated review directory outside `ANALYTICS_ROOT`:
 
 ```bash
-docker compose exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
+REVIEW_ROOT="$(pwd -W)/artifacts/review-$(date +%Y%m%d-%H%M%S)"
+uv run saleor-analytics export-artifacts "$REVIEW_ROOT"
+find "$REVIEW_ROOT" -maxdepth 5 -type f
 ```
+
+For example, if `REVIEW_ROOT` resolves to
+`<repository-root>/artifacts/review-20260926-210000`, the `base` bundle is
+created under `<repository-root>/artifacts/review-20260926-210000/base/`. It
+contains:
+
+```text
+base/
+  export.json
+  warehouse/current.json
+  releases/base/analytics.duckdb
+  releases/base/release.json
+  releases/base/dbt/run_results.json
+  bronze/base/orders.raw.jsonl
+  bronze/base/orders.accepted.jsonl
+  bronze/base/manifest.json
+  quarantine/base/orders.rejected.jsonl
+```
+
+The command never overwrites an existing bundle. With no `DESTINATION`, it
+uses `artifacts/` and creates `artifacts/<release-id>/`. To export a specific
+historical or failed candidate, supply `--release-id RELEASE_ID`; a non-active
+release does not include `warehouse/current.json`. Add `--all-snapshots` when
+a reviewer needs complete source lineage. The DuckDB file contains the full
+release state; the default bundle's latest Bronze snapshot alone cannot
+rebuild it.
+
+For data produced by Airflow, Compose maps the repository's `artifacts/`
+directory to `/opt/artifacts` in the container. From the repository root,
+use a destination visible on both sides of that mapping:
+
+```bash
+REVIEW_NAME="review-$(date +%Y%m%d-%H%M%S)"
+docker compose -f infra/airflow/compose.yml exec airflow \
+  /opt/analytics/bin/saleor-analytics export-artifacts "/opt/artifacts/$REVIEW_NAME"
+find "artifacts/$REVIEW_NAME" -maxdepth 5 -type f
+```
+
+The host bundle is `artifacts/$REVIEW_NAME/<active-release-id>/`.
 
 ## Presentation launcher (Git Bash)
 
