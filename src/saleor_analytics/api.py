@@ -20,6 +20,7 @@ class SaleorClient:
     """
 
     def __init__(self, settings: Settings, transport=None, sleeper=time.sleep):
+        """Create a client with bounded timeout, optional test transport, and token auth."""
         self.settings = settings
         self.sleeper = sleeper
         self.client = httpx.Client(
@@ -30,6 +31,7 @@ class SaleorClient:
             self.client.headers["Authorization"] = f"Bearer {token}"
 
     def close(self):
+        """Release the underlying HTTP connection pool."""
         self.client.close()
 
     def execute(self, query: str, variables: dict | None = None, *, mutation=False) -> dict:

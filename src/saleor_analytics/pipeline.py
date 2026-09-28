@@ -25,19 +25,23 @@ from saleor_analytics.records import CONTRACT_VERSION, RecordError, normalize_or
 
 
 def read_json(path: Path) -> dict:
+    """Read a UTF-8 JSON object from an evidence or release metadata file."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def fingerprint(value: Any) -> str:
+    """Produce a stable SHA-256 fingerprint for JSON-compatible input."""
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
 def root_lock(settings: Settings) -> FileLock:
+    """Return the process lock that serializes changes beneath the analytics root."""
     settings.root.mkdir(parents=True, exist_ok=True)
     return FileLock(str(settings.root / ".writer.lock"), timeout=60)
 
 
 def current_release(settings: Settings) -> dict:
+    """Return the published release pointer, or an empty object before first publication."""
     path = settings.root / "warehouse/current.json"
     return read_json(path) if path.exists() else {}
 
@@ -123,6 +127,7 @@ def export_artifacts(
 
 
 def verify_snapshot(directory: Path) -> dict:
+    """Validate a Bronze manifest's contract version and retained file checksums."""
     manifest = read_json(directory / "manifest.json")
     if manifest.get("contract_version") != CONTRACT_VERSION:
         raise RecordError("Unsupported contract; reingest legacy raw JSONL using a new ID/root")
@@ -223,6 +228,7 @@ def ingest_jsonl(
 
 
 def approved_inputs(settings: Settings) -> list[dict]:
+    """Return checksum-verified, passing Bronze snapshots not marked as excluded."""
     inputs = []
     excluded_path = settings.root / "excluded-snapshots.json"
     excluded = read_json(excluded_path) if excluded_path.exists() else {}

@@ -26,6 +26,7 @@ def filter_report(daily, products, currency, channels, start, end):
     """Apply identical currency/channel/date selections to all metrics."""
 
     def selected(frame):
+        """Apply the common filter set to one Gold metrics frame."""
         mask = (frame.currency == currency) & frame.channel.isin(channels or [])
         dates = pd.to_datetime(frame.order_date).dt.date
         if start:
@@ -38,6 +39,7 @@ def filter_report(daily, products, currency, channels, start, end):
 
 
 def create_app(settings: Settings) -> Dash:
+    """Build the Dash application backed by the currently published DuckDB release."""
     daily, _, _ = load_report(settings)
     currencies = sorted(daily.currency.unique())
     channels = sorted(daily.channel.unique())
@@ -78,6 +80,7 @@ def create_app(settings: Settings) -> Dash:
         Input("refresh", "n_intervals"),
     )
     def update(currency, selected_channels, start, end, _):
+        """Refresh figures, KPIs, quality text, and available filter options together."""
         daily, products, pointer = load_report(settings)
         currencies, channels = sorted(daily.currency.unique()), sorted(daily.channel.unique())
         filtered, lines = filter_report(daily, products, currency, selected_channels, start, end)
