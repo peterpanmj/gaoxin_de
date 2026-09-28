@@ -10,7 +10,20 @@ Start Docker Desktop with Linux containers and wait for the engine to become rea
 
 From `<repository-root>\infra\saleor-platform`:
 
+PowerShell:
+
 ```powershell
+docker compose config --quiet
+docker compose run --rm api python3 manage.py migrate
+docker compose run --rm api python3 manage.py populatedb --createsuperuser
+docker compose up -d
+docker compose ps
+```
+
+Git Bash, from the repository root:
+
+```bash
+cd infra/saleor-platform
 docker compose config --quiet
 docker compose run --rm api python3 manage.py migrate
 docker compose run --rm api python3 manage.py populatedb --createsuperuser

@@ -16,7 +16,9 @@ content is in English.
 
 ## Quick start without Docker
 
-Install Python 3.12 and uv, then run from this repository in PowerShell:
+Install Python 3.12 and uv, then run from the repository root in either shell.
+
+PowerShell:
 
 ```powershell
 uv sync --frozen
@@ -24,6 +26,18 @@ $demoSession = [guid]::NewGuid().ToString('N')
 $env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/demo-$demoSession"
 uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/base.jsonl" --count 20
 uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/base.jsonl" --snapshot-id base
+uv run saleor-analytics build-warehouse --release-id base
+uv run saleor-analytics status
+uv run saleor-analytics dashboard
+```
+
+Git Bash:
+
+```bash
+uv sync --frozen
+export ANALYTICS_ROOT="$(pwd -W)/var/demo-$(date +%Y%m%d-%H%M%S)"
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/base.jsonl" --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/base.jsonl" --snapshot-id base
 uv run saleor-analytics build-warehouse --release-id base
 uv run saleor-analytics status
 uv run saleor-analytics dashboard
@@ -69,7 +83,9 @@ revenue. No conversion or cross-currency total is implied.
 
 ## Validation and delivery
 
-```powershell
+Run these commands from either PowerShell or Git Bash:
+
+```bash
 uv run ruff format --check src tests dags
 uv run ruff check src tests dags
 uv run pytest -q

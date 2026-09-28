@@ -28,7 +28,7 @@ cloud IAM deployment and SCD2 remain deferred until justified by requirements.
 Run host commands from the repository root. In Git Bash, set
 `REPO_ROOT=/d/path/to/<repository-folder>` and enter the project with
 `cd "$REPO_ROOT"`. The examples in this section use Git Bash; the rehearsal
-sections below use PowerShell unless labelled otherwise.
+sections below give both PowerShell and Git Bash commands.
 
 With v2rayN listening on mixed port `10808`, use an HTTP proxy URL for both HTTP
 and HTTPS destinations. HTTPS traffic uses an HTTP CONNECT tunnel, so the
@@ -124,8 +124,10 @@ and [Git proxy configuration](https://git-scm.com/docs/git-config#Documentation/
 
 ## Quick rehearsal: mock generation, replay and updates
 
-Use PowerShell at the repository root. Start a fresh root to keep the existing
-demo intact and avoid mixing legacy v1 snapshots with the v2 contract:
+Start a fresh root from the repository root to keep the existing demo intact
+and avoid mixing legacy v1 snapshots with the v2 contract.
+
+PowerShell:
 
 ```powershell
 uv sync --frozen
@@ -138,10 +140,24 @@ uv run saleor-analytics build-warehouse --release-id base
 uv run saleor-analytics status
 ```
 
-Stop on any unexpected nonzero `$LASTEXITCODE`. Expected: 20 USD orders totaling
+Git Bash:
+
+```bash
+uv sync --frozen
+export ANALYTICS_ROOT="$(pwd -W)/var/modern-$(date +%Y%m%d-%H%M%S)"
+uv run saleor-analytics doctor
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/mock/base.jsonl" --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/mock/base.jsonl" --snapshot-id base
+uv run saleor-analytics build-warehouse --release-id base
+uv run saleor-analytics status
+```
+
+Stop on any unexpected nonzero exit code. Expected: 20 USD orders totaling
 400.00. Re-run `ingest-file` with the same file and ID: it returns the original
 manifest rather than inserting again. Re-run the same build with unchanged inputs:
 it reuses the validated candidate and publication is a no-op.
+
+PowerShell:
 
 ```powershell
 uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/mock/dup.jsonl" --scenario duplicate --count 20
@@ -149,6 +165,18 @@ uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/mock/dup.jsonl" --snaps
 uv run saleor-analytics build-warehouse --release-id duplicate
 uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/mock/update.jsonl" --scenario update --count 20
 uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/mock/update.jsonl" --snapshot-id update
+uv run saleor-analytics build-warehouse --release-id update
+uv run saleor-analytics dashboard --port 8051
+```
+
+Git Bash:
+
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/mock/dup.jsonl" --scenario duplicate --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/mock/dup.jsonl" --snapshot-id duplicate
+uv run saleor-analytics build-warehouse --release-id duplicate
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/mock/update.jsonl" --scenario update --count 20
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/mock/update.jsonl" --snapshot-id update
 uv run saleor-analytics build-warehouse --release-id update
 uv run saleor-analytics dashboard --port 8051
 ```
@@ -165,9 +193,19 @@ not mutate Saleor. It requires `allow_mock=true`, enabled in local demo config.
 Publication writes `warehouse/current.json`, not `warehouse/analytics.duckdb`.
 Use the pointer to locate the immutable database and retained test evidence:
 
+PowerShell:
+
 ```powershell
 $release = Get-Content "$env:ANALYTICS_ROOT/warehouse/current.json" -Raw | ConvertFrom-Json
 Get-Content "$env:ANALYTICS_ROOT/releases/$($release.release_id)/release.json"
+uv run python -c 'import os,pathlib,duckdb; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_database; p,_=published_database(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); c=duckdb.connect(str(p),read_only=True); print(c.sql("select * from analytics.analytics.daily_order_metrics")); c.close()'
+```
+
+Git Bash:
+
+```bash
+release_id="$(uv run python -c 'import json,os; print(json.load(open(os.path.join(os.environ["ANALYTICS_ROOT"], "warehouse", "current.json")))["release_id"])')"
+cat "$ANALYTICS_ROOT/releases/$release_id/release.json"
 uv run python -c 'import os,pathlib,duckdb; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_database; p,_=published_database(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); c=duckdb.connect(str(p),read_only=True); print(c.sql("select * from analytics.analytics.daily_order_metrics")); c.close()'
 ```
 
@@ -179,9 +217,18 @@ input and should not be distributed to consumers who only need Gold.
 
 ## Failure and recovery
 
+PowerShell:
+
 ```powershell
 uv run saleor-analytics mock-data "$env:ANALYTICS_ROOT/mock/bad.jsonl" --scenario invalid --count 2
 uv run saleor-analytics ingest-file "$env:ANALYTICS_ROOT/mock/bad.jsonl" --snapshot-id bad
+```
+
+Git Bash:
+
+```bash
+uv run saleor-analytics mock-data "$ANALYTICS_ROOT/mock/bad.jsonl" --scenario invalid --count 2
+uv run saleor-analytics ingest-file "$ANALYTICS_ROOT/mock/bad.jsonl" --snapshot-id bad
 ```
 
 Expected failure: one of two records is invalid (50%), exceeding the 5% limit.
@@ -194,7 +241,9 @@ Conflicting canonical payloads for the same order ID and source timestamp fail
 even below the reject threshold. Cross-snapshot conflicts fail dbt. To recover
 from an unpublished bad snapshot without erasing evidence:
 
-```powershell
+This command is the same in PowerShell and Git Bash:
+
+```bash
 uv run saleor-analytics exclude-snapshot --snapshot-id conflicting-input --reason 'Correcting a synthetic equal-version conflict'
 ```
 
@@ -214,11 +263,27 @@ local writers; filesystem administration remains outside this trust boundary.
 Use a separate fresh root for Saleor data and existing local credentials. The
 first incremental run requires a successfully published full extraction:
 
+PowerShell:
+
 ```powershell
-$env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/api-$demoSession"
+$apiSession = [guid]::NewGuid().ToString('N')
+$env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/api-$apiSession"
 $env:SALEOR_URL = 'http://localhost:8000/graphql/'
 $env:SALEOR_EMAIL = 'admin@example.com'
 $env:SALEOR_PASSWORD = 'admin'
+uv run saleor-analytics extract-saleor --snapshot-id initial --mode full
+uv run saleor-analytics build-warehouse --release-id initial
+uv run saleor-analytics extract-saleor --snapshot-id delta --mode incremental
+uv run saleor-analytics build-warehouse --release-id delta
+```
+
+Git Bash:
+
+```bash
+export ANALYTICS_ROOT="$(pwd -W)/var/api-$(date +%Y%m%d-%H%M%S)"
+export SALEOR_URL='http://localhost:8000/graphql/'
+export SALEOR_EMAIL='admin@example.com'
+export SALEOR_PASSWORD='admin'
 uv run saleor-analytics extract-saleor --snapshot-id initial --mode full
 uv run saleor-analytics build-warehouse --release-id initial
 uv run saleor-analytics extract-saleor --snapshot-id delta --mode incremental
@@ -244,14 +309,17 @@ requires reconciliation, tombstones/events or log CDC and explicit retention rul
 
 ## Airflow
 
-```powershell
+These commands work in PowerShell and Git Bash:
+
+```bash
 docker compose -f infra/airflow/compose.yml build
 docker compose -f infra/airflow/compose.yml up -d
 ```
 
 For this Windows proxy setup only, set
-`$env:BUILD_HTTP_PROXY='http://host.docker.internal:10808'` before building if
-package downloads need the host proxy. The address is a runtime build setting,
+`$env:BUILD_HTTP_PROXY='http://host.docker.internal:10808'` in PowerShell or
+`export BUILD_HTTP_PROXY='http://host.docker.internal:10808'` in Git Bash
+before building if package downloads need the host proxy. The address is a runtime build setting,
 not a required project dependency. Airflow is available at `http://localhost:8081`.
 Its standalone command creates local login credentials; retrieve them locally
 from the standalone startup output. This is an isolated demo, not HA production.
