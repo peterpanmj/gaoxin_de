@@ -137,6 +137,7 @@ and use new snapshot and release IDs for another attempt.
 | `ingest-file INPUT --snapshot-id ID` | Validate, normalize, deduplicate, and quarantine source rows. |
 | `extract-saleor --snapshot-id ID --mode full` | Capture a paginated API snapshot. |
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll source updates since the published checkpoint. |
+| `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read a historical `[start, end)` `updatedAt` interval without moving the checkpoint. |
 | `build-warehouse --release-id ID` | Stage, dbt validate, and publish a release. |
 | `stage-warehouse`, `validate-candidate`, `publish-candidate` | Run those release steps separately. |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot. |
@@ -146,7 +147,7 @@ and use new snapshot and release IDs for another attempt.
 
 Use `uv run saleor-analytics COMMAND --help` for options. Place global
 `--config PATH` before `COMMAND`. The
-[modern DE guide](MODERN_DE_DEMO.md) covers Saleor full and incremental
+[modern DE guide](MODERN_DE_DEMO.md) covers Saleor full, incremental, and date-range backfill
 extraction plus Airflow manual trigger JSON.
 
 ## Export and present Airflow results

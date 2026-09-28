@@ -460,7 +460,7 @@ def publish_candidate(settings: Settings, database: Path) -> Path:
         watermarks = dict(previous.get("watermarks", {}))
         for item in metadata["inputs"]:
             extraction = item.get("extraction")
-            if extraction:
+            if extraction and extraction["mode"] in {"full", "incremental"}:
                 source, upper = extraction["source"], extraction["upper"]
                 watermarks[source] = max(watermarks.get(source, ""), upper)
         pointer = {

@@ -90,18 +90,40 @@ def ingest_file(settings, input_path, snapshot_id):
 @cli.command("extract-saleor")
 @click.option("--snapshot-id", required=True)
 @click.option(
-    "--mode", type=click.Choice(["full", "incremental"]), default="full", show_default=True
+    "--mode",
+    type=click.Choice(["full", "incremental", "backfill"]),
+    default="full",
+    show_default=True,
+)
+@click.option(
+    "--start", "backfill_start", default=None, help="Backfill start, inclusive, as ISO-8601 UTC."
+)
+@click.option(
+    "--end", "backfill_end", default=None, help="Backfill end, exclusive, as ISO-8601 UTC."
 )
 @click.pass_obj
-def extract_saleor(settings, snapshot_id, mode):
+def extract_saleor(settings, snapshot_id, mode, backfill_start, backfill_end):
     """Extract a bounded full/API-delta window to validated JSONL (A/B/D).
 
     Incremental mode requires a published full baseline and overlaps its committed
     watermark by five minutes. Watermarks commit only with validated publication.
-    Credentials: SALEOR_TOKEN or SALEOR_EMAIL/SALEOR_PASSWORD. This is API polling,
-    not log CDC, deletion tracking or a historical as-of query.
+    Backfill mode requires --start/--end in UTC and reads [start, end) by updatedAt;
+    it never advances the incremental watermark. Credentials: SALEOR_TOKEN or
+    SALEOR_EMAIL/SALEOR_PASSWORD. This is API polling, not log CDC, deletion tracking
+    or a historical as-of query.
     """
-    click.echo(json.dumps(extract_orders(settings, snapshot_id, mode=mode), indent=2))
+    click.echo(
+        json.dumps(
+            extract_orders(
+                settings,
+                snapshot_id,
+                mode=mode,
+                backfill_start=backfill_start,
+                backfill_end=backfill_end,
+            ),
+            indent=2,
+        )
+    )
 
 
 @cli.command("build-warehouse")
