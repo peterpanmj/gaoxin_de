@@ -20,15 +20,3 @@ def test_generation_is_explicit_deterministic_and_non_overwriting(tmp_path):
     assert len(rows) == 3 and rows[0] == rows[-1]
     with pytest.raises(FileExistsError):
         generate_mock(settings, path, "invalid", 2)
-
-
-def test_trend_generation_uses_new_orders_on_consecutive_dates(tmp_path):
-    path = tmp_path / "trend.jsonl"
-    generate_mock(Settings(tmp_path, allow_mock=True), path, "trend", 3)
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert [row["id"] for row in rows] == [
-        "generated-trend-order-0",
-        "generated-trend-order-1",
-        "generated-trend-order-2",
-    ]
-    assert [row["created"][:10] for row in rows] == ["2026-01-16", "2026-01-17", "2026-01-18"]

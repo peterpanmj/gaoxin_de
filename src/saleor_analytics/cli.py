@@ -56,7 +56,7 @@ def doctor(settings):
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option(
     "--scenario",
-    type=click.Choice(["baseline", "trend", "update", "duplicate", "invalid"]),
+    type=click.Choice(["baseline", "update", "duplicate", "invalid"]),
     default="baseline",
 )
 @click.option("--count", type=click.IntRange(1, 100000), default=20)
