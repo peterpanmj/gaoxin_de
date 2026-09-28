@@ -6,6 +6,8 @@ content is in English.
 
 ## Start here
 
+- [New PC handoff](HANDOFF.md): fresh setup, repeatable demo, Airflow run, and
+  runtime data that Git does not transfer.
 - [Runnable modern DE demonstration](docs/MODERN_DE_DEMO.md): replay, updates,
   incremental extraction, quarantine and Airflow.
 - [CLI user guide for Git Bash](docs/CLI_USER_GUIDE.md): environment setup, commands, and mock ingestion use cases.
