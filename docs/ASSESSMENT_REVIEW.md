@@ -181,9 +181,9 @@ priorities below for the production-readiness roadmap.
 ## CLI walkthrough and analytical semantics
 
 Use new IDs on every invocation; existing IDs currently fail instead of resuming.
-These commands assume the repository root as the working directory:
+These commands work in PowerShell or Git Bash from the repository root:
 
-```powershell
+```bash
 uv run saleor-analytics --help
 uv run saleor-analytics ingest-file --help
 uv run saleor-analytics build-warehouse --help

@@ -19,6 +19,10 @@ have succeeded.
 
 ## Reproduce
 
+Run these commands from the repository root.
+
+PowerShell:
+
 ```powershell
 uv run ruff format --check src tests dags
 uv run ruff check src tests dags
@@ -29,6 +33,22 @@ docker compose -f infra/airflow/compose.yml up -d
 docker compose -f infra/airflow/compose.yml cp infra/airflow/smoke.py airflow:/tmp/smoke.py
 docker compose -f infra/airflow/compose.yml exec -T airflow python /tmp/smoke.py
 ```
+
+Git Bash:
+
+```bash
+uv run ruff format --check src tests dags
+uv run ruff check src tests dags
+uv run pytest -q
+uv build
+docker compose -f infra/airflow/compose.yml build
+docker compose -f infra/airflow/compose.yml up -d
+MSYS_NO_PATHCONV=1 docker compose -f infra/airflow/compose.yml cp infra/airflow/smoke.py airflow:/tmp/smoke.py
+MSYS_NO_PATHCONV=1 docker compose -f infra/airflow/compose.yml exec -T airflow python /tmp/smoke.py
+```
+
+`MSYS_NO_PATHCONV=1` keeps Git Bash from rewriting the container's `/tmp` path
+as a Windows path.
 
 Wait until standalone initialization completes before the smoke command. It
 uses an isolated named-volume subdirectory and unique manual run dates. It runs
