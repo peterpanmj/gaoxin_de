@@ -36,7 +36,7 @@ def command(*args):
     max_active_runs=1,
     params={
         "generate_mock": Param(False, type="boolean"),
-        "scenario": Param("baseline", enum=["baseline", "update", "duplicate", "invalid"]),
+        "scenario": Param("baseline", enum=["baseline", "trend", "update", "duplicate", "invalid"]),
         "count": Param(20, type="integer", minimum=1, maximum=100000),
         "input_mode": Param("saleor", enum=["saleor", "fixture"]),
         "extract_mode": Param("full", enum=["full", "incremental"]),

@@ -365,6 +365,13 @@ Manual trigger examples in the Airflow UI:
 ```
 
 ```json
+{"generate_mock": true, "scenario": "trend", "count": 14}
+```
+
+`trend` creates new synthetic orders on consecutive dates, which is useful for
+showing a multi-day Dash chart.
+
+```json
 {"generate_mock": false, "input_mode": "fixture"}
 ```
 
