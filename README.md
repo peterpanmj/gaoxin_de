@@ -77,6 +77,32 @@ not captured. dbt rebuilds from accepted history at this scale. Silver and Gold
 tables use DuckDB native storage. Exporting validated tables to Parquet for
 other analytical engines is planned, not implemented.
 
+### DuckDB schemas and tables
+
+Each validated release stores its analytical tables in
+`releases/<release-id>/analytics.duckdb`. The dbt target schema is `analytics`.
+In the DuckDB CLI, address the models as `analytics.<table_name>` (some clients
+show the fully qualified form as `analytics.analytics.<table_name>` because the
+database catalog is also named `analytics`).
+
+| Layer | Schema | Table | Grain / purpose |
+|---|---|---|---|
+| Silver | `analytics` | `orders` | One current, trusted version per Saleor order. |
+| Silver | `analytics` | `order_lines` | One current line per current order version. |
+| Gold | `analytics` | `daily_order_metrics` | Daily order count, gross value, and average order value by channel and currency. |
+| Gold | `analytics` | `daily_product_metrics` | Daily units and gross value by product, channel, and currency. |
+
+Bronze evidence is file-based rather than a DuckDB table: raw and accepted
+JSONL plus a manifest are stored under `bronze/<snapshot-id>/`.
+
+Example inspection commands:
+
+```sql
+show tables from analytics;
+select * from analytics.orders limit 10;
+select * from analytics.daily_order_metrics order by order_date;
+```
+
 Airflow orders preparation, ingestion, staging, dbt, publication and monitoring.
 Mock generation is optional and restricted to manual runs. Dash reloads one
 release every 30 seconds, with matching currency/channel/date filters for KPIs
