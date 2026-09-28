@@ -1,4 +1,8 @@
-"""Failure, replay and reporting invariants using independent expected totals."""
+"""Verify replay, failure recovery, watermark, and reporting invariants end to end.
+
+These tests use independent expected totals and real dbt builds to ensure retries,
+quarantine, releases, backfills, and the dashboard stay correct across failures.
+"""
 
 import copy
 import json
