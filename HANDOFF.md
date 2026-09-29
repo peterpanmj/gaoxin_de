@@ -29,9 +29,16 @@ In Git Bash:
 git clone --recurse-submodules https://github.com/peterpanmj/gaoxin_de.git
 cd gaoxin_de
 git status
+# First setup only; this downloads the versions pinned in uv.lock.
 uv sync --frozen
 uv run saleor-analytics doctor
 ```
+
+Do not repeat `uv sync --frozen` before every demo once `.venv` is ready. On a
+slow or unavailable connection, run `uv sync --frozen --offline` to use only
+the existing cache; it fails quickly when a required package is missing. A
+second simultaneous sync waits for uv's environment/cache lock, so cancel the
+duplicate rather than waiting for both.
 
 The submodule is the pinned upstream Saleor development stack. If the clone
 already exists, use `git pull --ff-only` on `main` and
