@@ -1,4 +1,8 @@
-"""Failure, replay and reporting invariants using independent expected totals."""
+"""Verify replay, failure recovery, watermark, and reporting invariants end to end.
+
+These tests use independent expected totals and real dbt builds to ensure retries,
+quarantine, releases, backfills, and the dashboard stay correct across failures.
+"""
 
 import copy
 import json
@@ -148,6 +152,61 @@ def test_incremental_window_retries_and_empty_delta(tmp_path):
     assert len(Source.calls) == count
 
 
+def test_backfill_uses_explicit_half_open_utc_window_without_advancing_watermark(tmp_path):
+    settings = Settings(tmp_path)
+    source = fingerprint(settings.saleor_url)
+    # A historical replay remains valid even when the incremental checkpoint is newer.
+    atomic_json(
+        tmp_path / "warehouse/current.json", {"watermarks": {source: "2099-01-01T00:00:00+00:00"}}
+    )
+    in_range = fixture()
+    at_end = copy.deepcopy(in_range)
+    at_end["id"] = "order-at-end"
+    at_end["updatedAt"] = "2026-01-16T00:00:00Z"
+    Source.pages, Source.calls = [page([in_range, at_end])], []
+
+    result = extract_orders(
+        settings,
+        "backfill-jan-15",
+        mode="backfill",
+        backfill_start="2026-01-15T00:00:00Z",
+        backfill_end="2026-01-16T00:00:00Z",
+        client_factory=Source,
+    )
+
+    assert result["accepted_count"] == 1
+    assert result["extraction"] == {
+        "mode": "backfill",
+        "source": source,
+        "upper": "2026-01-16T00:00:00+00:00",
+        "lower": "2026-01-15T00:00:00+00:00",
+        "base_watermark": "2099-01-01T00:00:00+00:00",
+        "range_semantics": "[start, end)",
+        "watermark_advance": False,
+    }
+    assert Source.calls[0]["filter"]["updatedAt"] == {
+        "gte": "2026-01-15T00:00:00+00:00",
+        "lte": "2026-01-16T00:00:00+00:00",
+    }
+    with pytest.raises(ValueError, match="both --start and --end"):
+        extract_orders(
+            settings,
+            "missing-bound",
+            mode="backfill",
+            backfill_start="2026-01-15T00:00:00Z",
+            client_factory=Source,
+        )
+    with pytest.raises(ValueError, match="UTC timestamp"):
+        extract_orders(
+            settings,
+            "non-utc-bound",
+            mode="backfill",
+            backfill_start="2026-01-15T00:00:00+08:00",
+            backfill_end="2026-01-16T00:00:00+08:00",
+            client_factory=Source,
+        )
+
+
 @pytest.mark.integration
 def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypatch):
     settings = Settings(tmp_path)
@@ -161,6 +220,28 @@ def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypa
     first = build_candidate(settings, "first")
     run_dbt_build(first)
     publish_candidate(settings, first)
+    backfill = copy.deepcopy(raw)
+    backfill["created"] = "2026-01-14T10:00:00Z"
+    backfill["updatedAt"] = "2026-01-14T12:00:00Z"
+    backfill["lines"][0]["id"] = "backfill-line"
+    ingest_jsonl(
+        settings,
+        write(tmp_path / "input.jsonl", backfill),
+        "backfill",
+        extraction={
+            "mode": "backfill",
+            "source": "synthetic",
+            "lower": "2026-01-14T00:00:00+00:00",
+            "upper": "2026-01-15T00:00:00+00:00",
+            "range_semantics": "[start, end)",
+            "watermark_advance": False,
+        },
+    )
+    backfilled = build_candidate(settings, "backfilled")
+    run_dbt_build(backfilled)
+    publish_candidate(settings, backfilled)
+    assert current_release(settings)["watermarks"] == {"synthetic": "2026-01-15T11:00:00+00:00"}
+
     old = current_release(settings)
     # A newer source version removes one line and changes amount.
     updated = fixture()

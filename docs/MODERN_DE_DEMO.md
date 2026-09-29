@@ -307,6 +307,35 @@ delays within the overlap. It is not a consistent database snapshot or a guarant
 to capture every intermediate mutation. Hard deletes are not inferred. Production
 requires reconciliation, tombstones/events or log CDC and explicit retention rules.
 
+## Historical date-range backfill
+
+Use a backfill when a known historical interval must be re-extracted, for example
+after a source repair or a transformation defect. The CLI requires explicit UTC
+timestamps and uses a start-inclusive, end-exclusive `updatedAt` interval. Adjacent
+runs can therefore meet at the same boundary without overlapping. A backfill is
+recorded as a new immutable Bronze snapshot and never advances the incremental
+watermark.
+
+PowerShell:
+
+```powershell
+uv run saleor-analytics extract-saleor --snapshot-id backfill-2026-01-01 --mode backfill --start 2026-01-01T00:00:00Z --end 2026-02-01T00:00:00Z
+uv run saleor-analytics build-warehouse --release-id backfill-2026-01-01
+```
+
+Git Bash:
+
+```bash
+uv run saleor-analytics extract-saleor --snapshot-id backfill-2026-01-01 --mode backfill --start 2026-01-01T00:00:00Z --end 2026-02-01T00:00:00Z
+uv run saleor-analytics build-warehouse --release-id backfill-2026-01-01
+```
+
+Review the generated `extractions/backfill-2026-01-01/request.json`, Bronze
+manifest, and dbt evidence before treating the release as authoritative. This is
+an API re-read of the current source filtered by `updatedAt`, not a database
+time-travel query: it cannot restore hard-deleted orders or prove the source's
+exact state at a past instant.
+
 ## Airflow
 
 These commands work in PowerShell and Git Bash:

@@ -1,3 +1,5 @@
+"""Verify ingestion, contracts, DuckDB builds, publication, and artifact export."""
+
 import json
 from pathlib import Path
 

@@ -1,3 +1,5 @@
+"""Verify Saleor GraphQL client errors and pagination are handled safely."""
+
 import httpx
 import pytest
 

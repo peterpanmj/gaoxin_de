@@ -1,3 +1,5 @@
+"""Verify deterministic local mock generation, safety guards, and scenario shapes."""
+
 import json
 
 import pytest

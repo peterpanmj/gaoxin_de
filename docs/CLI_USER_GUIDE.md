@@ -280,6 +280,7 @@ expected totals.
 | `ingest-file INPUT --snapshot-id ID` | Validate, normalize, deduplicate, quarantine, retain raw lineage | A/B/C |
 | `extract-saleor --snapshot-id ID --mode full` | Bounded paginated API snapshot through the same ingestion contract | A/B/D |
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll changes since published checkpoint, with overlap | A/D |
+| `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read an explicit `[start, end)` `updatedAt` interval without moving the incremental watermark | A/B/D |
 | `stage-warehouse --release-id ID` | Build isolated staging tables from approved history | B/D |
 | `validate-candidate DATABASE` | Run dbt models/tests and bind retained evidence to the candidate | C/D |
 | `publish-candidate DATABASE` | Verify evidence and atomically commit release/checkpoint | C/D |
@@ -296,8 +297,8 @@ A stale candidate cannot replace a newer published release.
 
 ## Source, orchestration and troubleshooting
 
-The [modern DE guide](MODERN_DE_DEMO.md) contains executable full/incremental
-Saleor commands, Airflow manual trigger JSON and
+The [modern DE guide](MODERN_DE_DEMO.md) contains executable full, incremental,
+and date-range backfill Saleor commands, Airflow manual trigger JSON and
 release inspection. Set `SALEOR_URL`, `SALEOR_EMAIL`, `SALEOR_PASSWORD` in the
 runtime environment. Source URL is the checkpoint identity; keep it stable.
 

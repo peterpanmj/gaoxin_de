@@ -16,6 +16,7 @@ from airflow.operators.python import get_current_context
 
 
 def command(*args):
+    """Run the isolated analytics CLI with a fixed config and no shell interpolation."""
     subprocess.run(
         [
             os.getenv("ANALYTICS_CLI", "/opt/analytics/bin/saleor-analytics"),
@@ -44,8 +45,11 @@ def command(*args):
     tags=["saleor", "analytics", "demo"],
 )
 def saleor_analytics_daily():
+    """Define the serial, publish-gated daily Saleor analytics pipeline."""
+
     @task
     def prepare():
+        """Choose a safe input source and derive immutable batch-specific artifact paths."""
         context = get_current_context()
         params = context["params"]
         run = context["dag_run"]
@@ -76,6 +80,7 @@ def saleor_analytics_daily():
 
     @task(retries=2, retry_delay=timedelta(seconds=10))
     def extract_and_validate(batch):
+        """Ingest a local file or extract Saleor data into a validated Bronze snapshot."""
         if batch["file"]:
             command("ingest-file", batch["file"], "--snapshot-id", batch["batch"])
         else:
@@ -86,21 +91,25 @@ def saleor_analytics_daily():
 
     @task(retries=1, retry_delay=timedelta(seconds=10))
     def stage(batch):
+        """Build a candidate DuckDB release from all approved Bronze snapshots."""
         command("stage-warehouse", "--release-id", batch["batch"])
         return batch
 
     @task
     def transform_and_test(batch):
+        """Run dbt models and data tests against the candidate release."""
         command("validate-candidate", batch["database"])
         return batch
 
     @task(retries=1, retry_delay=timedelta(seconds=10))
     def publish(batch):
+        """Atomically publish a checksum-validated candidate release and watermark state."""
         command("publish-candidate", batch["database"])
         return batch
 
     @task
     def monitor(batch):
+        """Fail the task when the just-published release does not meet freshness policy."""
         command("status", "--max-age-hours", "24")
 
     monitor(publish(transform_and_test(stage(extract_and_validate(prepare())))))

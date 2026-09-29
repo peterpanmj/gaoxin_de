@@ -1,3 +1,5 @@
+"""Verify the public Click CLI exposes commands and rejects bad configuration."""
+
 from click.testing import CliRunner
 
 from saleor_analytics.cli import cli

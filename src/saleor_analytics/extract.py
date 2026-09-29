@@ -41,11 +41,24 @@ query Orders($first: Int!, $after: String, $filter: OrderFilterInput) {
 """
 
 
+def utc_timestamp(value: str, option: str) -> datetime:
+    """Parse an explicit UTC timestamp supplied by a backfill operator."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{option} must be an ISO-8601 UTC timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta():
+        raise ValueError(f"{option} must be a UTC timestamp ending in Z or +00:00")
+    return parsed.astimezone(UTC)
+
+
 def extract_orders(
     settings: Settings,
     snapshot_id: str,
     *,
     mode: str = "full",
+    backfill_start: str | None = None,
+    backfill_end: str | None = None,
     clock=None,
     client_factory=SaleorClient,
 ) -> dict:
@@ -57,8 +70,19 @@ def extract_orders(
     historical snapshot isolation; source deletions are not inferred.
     """
     identifier(snapshot_id)
-    if mode not in {"full", "incremental"}:
-        raise ValueError("mode must be full or incremental")
+    if mode not in {"full", "incremental", "backfill"}:
+        raise ValueError("mode must be full, incremental, or backfill")
+    if mode == "backfill":
+        if not backfill_start or not backfill_end:
+            raise ValueError("Backfill requires both --start and --end")
+        lower_bound = utc_timestamp(backfill_start, "--start")
+        upper_bound = utc_timestamp(backfill_end, "--end")
+        if lower_bound >= upper_bound:
+            raise ValueError("--start must be earlier than --end")
+    elif backfill_start or backfill_end:
+        raise ValueError("--start and --end are valid only for backfill")
+    else:
+        lower_bound = upper_bound = None
     directory = settings.root / "extractions" / snapshot_id
     directory.mkdir(parents=True, exist_ok=True)
     with FileLock(str(directory / ".lock"), timeout=60):
@@ -66,25 +90,45 @@ def extract_orders(
         plan_path = directory / "request.json"
         if plan_path.exists():
             plan = read_json(plan_path)
-            if plan["mode"] != mode or plan["source"] != source:
+            if (
+                plan["mode"] != mode
+                or plan["source"] != source
+                or (
+                    mode == "backfill"
+                    and (
+                        plan.get("lower") != lower_bound.isoformat()
+                        or plan.get("upper") != upper_bound.isoformat()
+                    )
+                )
+            ):
                 raise RecordError("Extraction ID belongs to a different source/mode")
         else:
-            upper = (clock() if clock else datetime.now(UTC)) - timedelta(seconds=5)
             checkpoint = current_release(settings).get("watermarks", {}).get(source)
-            if mode == "incremental" and not checkpoint:
-                raise RecordError("Publish an initial full extraction before incremental polling")
-            lower = (
-                datetime.fromisoformat(checkpoint) - timedelta(minutes=5) if checkpoint else None
-            )
-            if checkpoint and upper < datetime.fromisoformat(checkpoint):
-                raise RecordError("Clock precedes committed source watermark")
+            if mode == "backfill":
+                upper, lower = upper_bound, lower_bound
+            else:
+                upper = (clock() if clock else datetime.now(UTC)) - timedelta(seconds=5)
+                if mode == "incremental" and not checkpoint:
+                    raise RecordError(
+                        "Publish an initial full extraction before incremental polling"
+                    )
+                lower = (
+                    datetime.fromisoformat(checkpoint) - timedelta(minutes=5)
+                    if checkpoint
+                    else None
+                )
+                if checkpoint and upper < datetime.fromisoformat(checkpoint):
+                    raise RecordError("Clock precedes committed source watermark")
             plan = {
                 "mode": mode,
                 "source": source,
                 "upper": upper.isoformat(),
-                "lower": lower.isoformat() if mode == "incremental" else None,
+                "lower": lower.isoformat() if mode in {"incremental", "backfill"} else None,
                 "base_watermark": checkpoint,
             }
+            if mode == "backfill":
+                plan["range_semantics"] = "[start, end)"
+                plan["watermark_advance"] = False
             atomic_json(plan_path, plan)
         snapshot = settings.root / "bronze" / snapshot_id
         if (snapshot / "manifest.json").exists():
@@ -116,7 +160,14 @@ def extract_orders(
                         },
                     )["orders"]
                     for edge in result["edges"]:
-                        stream.write(json.dumps(edge["node"], sort_keys=True) + "\n")
+                        node = edge["node"]
+                        if mode == "backfill":
+                            updated = utc_timestamp(node["updatedAt"], "source updatedAt")
+                            # Saleor's filter has an inclusive upper bound. Enforce [start, end)
+                            # locally so adjacent backfills neither overlap nor leave a gap.
+                            if not lower_bound <= updated < upper_bound:
+                                continue
+                        stream.write(json.dumps(node, sort_keys=True) + "\n")
                     page = result["pageInfo"]
                     if not page["hasNextPage"]:
                         break

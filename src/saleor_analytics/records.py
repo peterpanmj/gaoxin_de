@@ -32,24 +32,28 @@ STATUSES = {
 
 
 def _object(value: Any, field: str) -> dict:
+    """Require an object-valued contract field."""
     if not isinstance(value, dict):
         raise RecordError(f"{field} must be an object")
     return value
 
 
 def _text(value: Any, field: str) -> str:
+    """Require and trim a nonblank text-valued contract field."""
     if not isinstance(value, str) or not value.strip():
         raise RecordError(f"{field} must be a nonempty string")
     return value.strip()
 
 
 def _required(value: Any, field: str) -> Any:
+    """Require a value that is neither absent nor the empty string."""
     if value is None or value == "":
         raise RecordError(f"{field} is required")
     return value
 
 
 def _timestamp(value: Any, field: str) -> str:
+    """Require a timezone-aware ISO timestamp and normalize it to UTC Z notation."""
     if not isinstance(value, str):
         raise RecordError(f"{field} must be an ISO-8601 timestamp")
     try:
@@ -62,6 +66,7 @@ def _timestamp(value: Any, field: str) -> str:
 
 
 def _money(value: Any, field: str, currency: str) -> str:
+    """Validate a currency-matched finite amount and return two-decimal text."""
     if not isinstance(value, dict):
         raise RecordError(f"{field} must be a money object")
     if value.get("currency") != currency:
@@ -98,6 +103,7 @@ class Order:
     lines: tuple[OrderLine, ...]
 
     def as_dict(self) -> dict[str, Any]:
+        """Convert the immutable normalized order and nested lines to plain JSON data."""
         return asdict(self)
 
 
