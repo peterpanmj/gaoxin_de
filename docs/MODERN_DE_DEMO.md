@@ -384,6 +384,18 @@ No data-volume reset is needed for repeated runs; run IDs derive unique batch ID
 
 Manual trigger examples in the Airflow UI:
 
+Generate a distinct daily synthetic JSONL snapshot for a chosen UTC order date:
+
+```json
+{"generate_mock": true, "scenario": "baseline", "count": 12, "mock_date": "2026-09-30"}
+```
+
+Change `mock_date` and `count` for another day. The DAG writes the JSONL under
+`/opt/data/mock/` in the Airflow data volume and publishes it as a new Bronze
+snapshot. This is an incremental addition of synthetic daily orders to the
+warehouse; it does not call Saleor or advance the Saleor API watermark. A
+same-day rerun uses the same order IDs, so use another date to add new orders.
+
 ```json
 {"generate_mock": true, "scenario": "duplicate", "count": 20}
 ```
@@ -401,6 +413,23 @@ generation disabled; attempting generation on a nonmanual run fails explicitly.
 For Saleor, set runtime credential environment variables before Compose startup,
 choose `input_mode=saleor`, and use `extract_mode=incremental` after a published
 full baseline. A historical Airflow logical date does not create an as-of source query.
+The local Saleor platform accepts the Docker host name `api`, not
+`host.docker.internal`. For real-data Airflow runs, start Compose with the
+optional [Saleor overlay](../infra/airflow/compose.saleor.yml), which joins the
+Saleor Docker network, uses `http://api:8000/graphql/`, and keeps its warehouse
+under `/opt/data/saleor-live-demo` instead of mixing it with mock snapshots.
+Set `SALEOR_EMAIL` and `SALEOR_PASSWORD` (or `SALEOR_TOKEN`) in your shell before
+starting Compose; do not commit credentials. The Saleor platform stack and its
+`saleor-platform_saleor-backend-tier` network must already be running.
+
+```bash
+docker compose -f infra/airflow/compose.yml -f infra/airflow/compose.saleor.yml up -d
+```
+
+After a full run publishes the first API watermark, trigger later manual runs
+with `{"generate_mock": false, "input_mode": "saleor", "extract_mode": "incremental"}`.
+Scheduled runs still default to `extract_mode=full`; pause the DAG after manual
+runs if you do not want another scheduled full scan.
 Retries reuse IDs and artifacts; deterministic validation errors still require
 corrected input/new IDs. Monitoring failure happens after publication and does
 not roll a successful release back.

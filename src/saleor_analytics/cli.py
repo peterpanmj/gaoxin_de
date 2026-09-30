@@ -60,8 +60,9 @@ def doctor(settings):
     default="baseline",
 )
 @click.option("--count", type=click.IntRange(1, 100000), default=20)
+@click.option("--date", "order_date", default=None, help="UTC order day in YYYY-MM-DD format.")
 @click.pass_obj
-def mock_data(settings, output, scenario, count):
+def mock_data(settings, output, scenario, count, order_date):
     """Write deterministic local mock JSONL (B/C/D); never mutate Saleor.
 
     Requires allow_mock=true. Baseline has COUNT USD20 orders; update changes
@@ -69,7 +70,7 @@ def mock_data(settings, output, scenario, count):
     zero. With COUNT=20, invalid is exactly the default 5% threshold; COUNT=2
     produces a blocking 50% reject rate. Ingest the output with ingest-file.
     """
-    click.echo(json.dumps(generate_mock(settings, output, scenario, count), indent=2))
+    click.echo(json.dumps(generate_mock(settings, output, scenario, count, order_date), indent=2))
 
 
 @cli.command("ingest-file")

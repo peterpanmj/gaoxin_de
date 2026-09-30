@@ -1,0 +1,15 @@
+# Optional overlay for the local Saleor platform stack.
+# Start with: docker compose -f infra/airflow/compose.yml -f infra/airflow/compose.saleor.yml up -d
+services:
+  airflow:
+    environment:
+      ANALYTICS_ROOT: /opt/data/saleor-live-demo
+      SALEOR_URL: http://api:8000/graphql/
+    networks:
+      - default
+      - saleor-backend
+
+networks:
+  saleor-backend:
+    external: true
+    name: ${SALEOR_DOCKER_NETWORK:-saleor-platform_saleor-backend-tier}
