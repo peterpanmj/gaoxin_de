@@ -39,6 +39,7 @@ def command(*args):
         "generate_mock": Param(False, type="boolean"),
         "scenario": Param("baseline", enum=["baseline", "update", "duplicate", "invalid"]),
         "count": Param(20, type="integer", minimum=1, maximum=100000),
+        "mock_date": Param(None, type=["null", "string"], format="date"),
         "input_mode": Param("saleor", enum=["saleor", "fixture"]),
         "extract_mode": Param("full", enum=["full", "incremental"]),
     },
@@ -61,14 +62,17 @@ def saleor_analytics_daily():
         root = Path(os.getenv("ANALYTICS_ROOT", "/opt/data"))
         path = root / "mock" / f"{batch}.jsonl"
         if generate:
-            command(
+            mock_args = [
                 "mock-data",
                 str(path),
                 "--scenario",
                 params["scenario"],
                 "--count",
                 str(params["count"]),
-            )
+            ]
+            if params["mock_date"]:
+                mock_args.extend(["--date", params["mock_date"]])
+            command(*mock_args)
         elif params["input_mode"] == "fixture":
             path = Path("/opt/project/samples/orders-baseline.jsonl")
         return {

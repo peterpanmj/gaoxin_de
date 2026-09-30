@@ -1,13 +1,21 @@
 """Deterministic local synthetic scenarios; no source-system mutation (B/C/D)."""
 
 import json
+import re
+from datetime import date
 from pathlib import Path
 
 from saleor_analytics.config import Settings
 from saleor_analytics.records import RecordError
 
 
-def generate_mock(settings: Settings, output: Path, scenario: str = "baseline", count: int = 20):
+def generate_mock(
+    settings: Settings,
+    output: Path,
+    scenario: str = "baseline",
+    count: int = 20,
+    order_date: str | None = None,
+):
     """Generate safe JSONL fixtures, including update/duplicate/reject scenarios.
 
     Explicit local allow_mock is required. Existing different files are never
@@ -17,22 +25,31 @@ def generate_mock(settings: Settings, output: Path, scenario: str = "baseline", 
         raise RecordError("Mock generation disabled; set allow_mock=true in a demo config")
     if scenario not in {"baseline", "update", "duplicate", "invalid"} or not 1 <= count <= 100000:
         raise ValueError("Invalid scenario or count (1-100000)")
+    if order_date is not None:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", order_date):
+            raise ValueError("date must use YYYY-MM-DD")
+        day = date.fromisoformat(order_date).isoformat()
+        suffix = day.replace("-", "") + "-"
+    else:
+        day = "2026-01-15"
+        suffix = ""
+    updated_time = f"{day}T11:00:00Z" if order_date else "2026-01-16T10:00:00Z"
     rows = []
     for i in range(count):
         quantity = 3 if scenario == "update" and i == 0 else 2
         amount = f"{quantity * 10}.00"
         rows.append(
             {
-                "id": f"generated-order-{i}",
-                "number": f"SYN-{i}",
-                "created": "2026-01-15T10:00:00Z",
-                "updatedAt": "2026-01-16T10:00:00Z" if quantity == 3 else "2026-01-15T10:00:00Z",
+                "id": f"generated-order-{suffix}{i}",
+                "number": f"SYN-{suffix}{i}",
+                "created": f"{day}T10:00:00Z",
+                "updatedAt": updated_time if quantity == 3 else f"{day}T10:00:00Z",
                 "status": "UNFULFILLED",
                 "channel": {"slug": "synthetic-us", "currencyCode": "USD"},
                 "total": {"gross": {"amount": amount, "currency": "USD"}},
                 "lines": [
                     {
-                        "id": f"generated-line-{i}",
+                        "id": f"generated-line-{suffix}{i}",
                         "productName": "Synthetic notebook",
                         "productSku": "SYN-NOTEBOOK",
                         "quantity": quantity,
