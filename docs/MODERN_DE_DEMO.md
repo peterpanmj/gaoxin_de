@@ -127,9 +127,32 @@ and [Git proxy configuration](https://git-scm.com/docs/git-config#Documentation/
 Start a fresh root from the repository root to keep the existing demo intact
 and avoid mixing legacy v1 snapshots with the v2 contract.
 
+### Cached or offline Python environment
+
+Run `uv sync --frozen` only on first setup, or after the lockfile changes. It
+installs the exact packages from `uv.lock` and may download Python or packages,
+so it can take time on a slow connection. Do not start a second sync while one
+is running: the later process waits for uv's environment/cache lock.
+
+If `.venv/` already exists, skip the sync and run the demo commands below. To
+verify that every required package is already cached without using the network:
+
+```powershell
+uv sync --frozen --offline
+```
+
+```bash
+uv sync --frozen --offline
+```
+
+Offline mode fails quickly if the environment or cache is incomplete. You can
+also bypass uv for an existing Windows environment with
+`./.venv/Scripts/saleor-analytics.exe` in either PowerShell or Git Bash.
+
 PowerShell:
 
 ```powershell
+# First setup only; skip when the cached .venv is already usable.
 uv sync --frozen
 $demoSession = [guid]::NewGuid().ToString('N')
 $env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/modern-$demoSession"
@@ -143,6 +166,7 @@ uv run saleor-analytics status
 Git Bash:
 
 ```bash
+# First setup only; skip when the cached .venv is already usable.
 uv sync --frozen
 export ANALYTICS_ROOT="$(pwd -W)/var/modern-$(date +%Y%m%d-%H%M%S)"
 uv run saleor-analytics doctor

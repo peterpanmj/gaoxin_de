@@ -19,10 +19,15 @@ content is in English.
 ## Quick start without Docker
 
 Install Python 3.12 and uv, then run from the repository root in either shell.
+`uv sync --frozen` is required only for the first setup or after `uv.lock`
+changes; it may download packages. If the cached `.venv` already works, skip
+that step. Use `uv sync --frozen --offline` to check the cache without network
+access; it fails quickly if a dependency is missing.
 
 PowerShell:
 
 ```powershell
+# First setup only.
 uv sync --frozen
 $demoSession = [guid]::NewGuid().ToString('N')
 $env:ANALYTICS_ROOT = Join-Path (Get-Location) "var/demo-$demoSession"
@@ -36,6 +41,7 @@ uv run saleor-analytics dashboard
 Git Bash:
 
 ```bash
+# First setup only.
 uv sync --frozen
 export ANALYTICS_ROOT="$(pwd -W)/var/demo-$(date +%Y%m%d-%H%M%S)"
 uv run saleor-analytics mock-data "$ANALYTICS_ROOT/base.jsonl" --count 20
