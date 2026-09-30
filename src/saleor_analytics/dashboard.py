@@ -33,7 +33,8 @@ def filter_report(daily, products, currency, channels, start, end):
             mask &= dates >= pd.Timestamp(start).date()
         if end:
             mask &= dates <= pd.Timestamp(end).date()
-        return frame.loc[mask].copy()
+        # Plotly joins line points in row order, so keep every channel chronological.
+        return frame.loc[mask].sort_values(["channel", "order_date"]).copy()
 
     return selected(daily), selected(products)
 

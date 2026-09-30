@@ -97,6 +97,17 @@ def test_currency_channels_and_empty_selection():
     assert daily.gross_amount.sum() == products.gross_amount.sum() == 20
     assert filter_report(frame, frame, "USD", [], None, None)[0].empty
 
+    unsorted = pd.DataFrame(
+        {
+            "currency": ["USD"] * 3,
+            "channel": ["a"] * 3,
+            "order_date": pd.to_datetime(["2026-01-15", "2026-01-18", "2026-01-16"]),
+            "gross_amount": [400, 20, 20],
+        }
+    )
+    chronological, _ = filter_report(unsorted, unsorted, "USD", ["a"], None, None)
+    assert chronological.order_date.dt.day.tolist() == [15, 16, 18]
+
 
 class Source:
     calls = []
