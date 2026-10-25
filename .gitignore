@@ -14,6 +14,8 @@ dist/
 # Generated data, reports and tool artifacts
 var/
 artifacts/
+infra/airflow/wheelhouse/*
+!infra/airflow/wheelhouse/.gitkeep
 *.duckdb
 *.duckdb.wal
 dbt_packages/

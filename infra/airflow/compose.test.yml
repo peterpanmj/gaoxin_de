@@ -1,0 +1,26 @@
+# Standalone test configuration: no Airflow service, ports, or persistent volumes.
+name: saleor-analytics-tests
+services:
+  tests:
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: infra/airflow/Dockerfile
+      target: test
+      additional_contexts:
+        python_wheelhouse: ${PYTHON_WHEELHOUSE:-./wheelhouse}
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTP_PROXY:-}
+    working_dir: /opt/project
+    environment:
+      ANALYTICS_ROOT: /tmp/analytics-tests
+      ARTIFACT_EXPORT_ROOT: /tmp/artifacts-tests
+    command:
+      - /opt/analytics/bin/python
+      - -m
+      - pytest
+      - -q
+      - -p
+      - no:cacheprovider
+      - --basetemp=/tmp/pytest
