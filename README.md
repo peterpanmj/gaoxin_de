@@ -1,7 +1,7 @@
 # Saleor Analytics Demo
 
 A Principal Data Engineer interview demo: Saleor GraphQL, a Python Click CLI,
-dbt, DuckDB, Airflow and Plotly Dash. All data is synthetic and all project
+PySpark, Parquet, Airflow and Plotly Dash. All data is synthetic and all project
 content is in English.
 
 ## Start here
@@ -12,13 +12,13 @@ content is in English.
   incremental extraction, quarantine and Airflow.
 - [CLI user guide for Git Bash](docs/CLI_USER_GUIDE.md): environment setup, commands, and mock ingestion use cases.
 - [CLI user guide for PowerShell](docs/CLI_USER_GUIDE_WINDOWS.md): the same workflow with Windows commands.
-- [Assessment A-F review](docs/ASSESSMENT_REVIEW.md): requirements and remaining boundaries.
+- [Historical assessment A-F review](docs/ASSESSMENT_REVIEW.md): September 2026 audit of the earlier DuckDB/dbt branch.
 - [Operations](docs/OPERATIONS.md) and [Saleor setup](SALEOR_SETUP.md).
 - [Original design](DEMO_DESIGN.md) and [implementation plan](IMPLEMENTATION_PLAN.md).
 
 ## Quick start without Docker
 
-Install Python 3.12 and uv, then run from the repository root in either shell.
+Install Python 3.12, Java 17 or later, and uv, then run from the repository root in either shell.
 `uv sync --frozen` is required only for the first setup or after `uv.lock`
 changes; it may download packages. If the cached `.venv` already works, skip
 that step. Use `uv sync --frozen --offline` to check the cache without network
@@ -64,8 +64,8 @@ flowchart LR
     A[Saleor API or mock JSONL] --> B[Python contract and deduplication]
     B --> C[Bronze raw / accepted / manifest]
     B --> Q[Quarantine]
-    C --> D[Isolated DuckDB candidate]
-    D --> E[dbt Silver and Gold plus 10 data tests]
+    C --> D[Isolated Spark staging in Parquet]
+    D --> E[PySpark Silver and Gold plus 11 quality checks]
     E --> F[Validated immutable release]
     F --> G[Atomic release and watermark pointer]
     G --> H[Currency-filtered Dash reports]
@@ -74,42 +74,38 @@ flowchart LR
 Same-input retries reuse snapshots; exact duplicates collapse; conflicting
 versions fail. Invalid rows are quarantined, with a configurable reject threshold.
 Current-state models select the complete latest order and line set. Both build
-and direct publication require checksum-bound dbt evidence. Failed validation
+and direct publication require checksum-bound Spark evidence. Failed validation
 or publication preserves the previously served release and source checkpoint.
 
 Incremental API polling uses `updatedAt`, persisted bounds and five-minute
 overlap. This is not log CDC: hard deletes and every intermediate mutation are
-not captured. dbt rebuilds from accepted history at this scale. Silver and Gold
-tables use DuckDB native storage. Exporting validated tables to Parquet for
-other analytical engines is planned, not implemented.
+not captured. Spark rebuilds from accepted history at this scale. Staging,
+Silver, and Gold are Parquet datasets in each immutable release.
+An existing DuckDB release pointer can be superseded by building a new Spark
+release from its retained Bronze snapshots; use a new release ID. Until then,
+the new dashboard will not serve the legacy release.
 
-### DuckDB schemas and tables
+### Parquet datasets
 
-Each validated release stores its analytical tables in
-`releases/<release-id>/analytics.duckdb`. The dbt target schema is `analytics`.
-In the DuckDB CLI, address the models as `analytics.<table_name>` (some clients
-show the fully qualified form as `analytics.analytics.<table_name>` because the
-database catalog is also named `analytics`).
+Each validated release stores its analytical datasets under
+`releases/<release-id>/dataset/`. PySpark writes them; Dash reads the small
+Gold outputs with PyArrow.
 
-| Layer | Schema | Table | Grain / purpose |
-|---|---|---|---|
-| Silver | `analytics` | `orders` | One current, trusted version per Saleor order. |
-| Silver | `analytics` | `order_lines` | One current line per current order version. |
-| Gold | `analytics` | `daily_order_metrics` | Daily order count, gross value, and average order value by channel and currency. |
-| Gold | `analytics` | `daily_product_metrics` | Daily units and gross value by product, channel, and currency. |
+| Layer | Parquet path in `dataset/` | Grain / purpose |
+|---|---|---|
+| Staging | `staging/order_versions/` | Approved order versions from Bronze. |
+| Silver | `silver/orders/` | One current, trusted version per Saleor order. |
+| Silver | `silver/order_lines/` | One current line per current order version. |
+| Gold | `gold/daily_order_metrics/` | Daily order count, gross value, and average order value by channel and currency. |
+| Gold | `gold/daily_product_metrics/` | Daily units and gross value by product, channel, and currency. |
 
-Bronze evidence is file-based rather than a DuckDB table: raw and accepted
+Bronze evidence is file-based: raw and accepted
 JSONL plus a manifest are stored under `bronze/<snapshot-id>/`.
 
-Example inspection commands:
+For a quick inspection, read a Gold directory with
+`pandas.read_parquet("<analytics-root>/releases/<release-id>/dataset/gold/daily_order_metrics")`.
 
-```sql
-show tables from analytics;
-select * from analytics.orders limit 10;
-select * from analytics.daily_order_metrics order by order_date;
-```
-
-Airflow orders preparation, ingestion, staging, dbt, publication and monitoring.
+Airflow orders preparation, ingestion, Spark staging, transformation/checks, publication and monitoring.
 Mock generation is optional and restricted to manual runs. Dash reloads one
 release every 30 seconds, with matching currency/channel/date filters for KPIs
 and charts. Gross order value excludes draft/canceled orders; it is not recognized
@@ -126,13 +122,13 @@ uv run pytest -q
 uv build
 ```
 
-Tests include real dbt builds and publication-failure recovery. GitHub Actions
+Tests include real Spark builds and publication-failure recovery. GitHub Actions
 validates pull requests and main; GitLab CI is an alternative example. The manual
 production environment job is a promotion illustration, not a deployed service;
 configure repository protection/reviewers separately. Runtime data, local secrets,
 and AI configuration/prompt logs are ignored by Git.
 
-The demo uses local filesystem locks, a single-node warehouse and environment
+The demo uses local filesystem locks, a single-node Spark session and environment
 secrets. HA, cloud IAM, external alert delivery, retention enforcement, source
 completeness guarantees and a 4 GB full-stack acceptance test remain outside
 implemented scope. Use a fresh data root for contract v2; legacy snapshots are

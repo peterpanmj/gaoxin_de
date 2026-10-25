@@ -1,6 +1,6 @@
 """Verify replay, failure recovery, watermark, and reporting invariants end to end.
 
-These tests use independent expected totals and real dbt builds to ensure retries,
+These tests use independent expected totals and real Spark builds to ensure retries,
 quarantine, releases, backfills, and the dashboard stay correct across failures.
 """
 
@@ -9,7 +9,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 import pytest
 
@@ -24,8 +23,9 @@ from saleor_analytics.pipeline import (
     fingerprint,
     ingest_jsonl,
     publish_candidate,
+    published_dataset,
     read_json,
-    run_dbt_build,
+    run_spark_build,
 )
 from saleor_analytics.records import RecordError, normalize_order
 
@@ -107,6 +107,15 @@ def test_currency_channels_and_empty_selection():
     )
     chronological, _ = filter_report(unsorted, unsorted, "USD", ["a"], None, None)
     assert chronological.order_date.dt.day.tolist() == [15, 16, 18]
+
+
+def test_legacy_duckdb_pointer_requires_new_spark_release(tmp_path):
+    settings = Settings(tmp_path)
+    atomic_json(
+        tmp_path / "warehouse/current.json", {"release_id": "legacy", "database_sha256": "old"}
+    )
+    with pytest.raises(RecordError, match="Legacy warehouse release"):
+        published_dataset(settings)
 
 
 class Source:
@@ -229,7 +238,7 @@ def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypa
     provenance = {"mode": "full", "source": "synthetic", "upper": "2026-01-15T11:00:00+00:00"}
     ingest_jsonl(settings, write(tmp_path / "input.jsonl", raw), "one", extraction=provenance)
     first = build_candidate(settings, "first")
-    run_dbt_build(first)
+    run_spark_build(first)
     publish_candidate(settings, first)
     backfill = copy.deepcopy(raw)
     backfill["created"] = "2026-01-14T10:00:00Z"
@@ -249,7 +258,7 @@ def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypa
         },
     )
     backfilled = build_candidate(settings, "backfilled")
-    run_dbt_build(backfilled)
+    run_spark_build(backfilled)
     publish_candidate(settings, backfilled)
     assert current_release(settings)["watermarks"] == {"synthetic": "2026-01-15T11:00:00+00:00"}
 
@@ -259,7 +268,7 @@ def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypa
     updated["updatedAt"] = "2026-01-16T12:00:00Z"
     ingest_jsonl(settings, write(tmp_path / "input.jsonl", updated), "two")
     second = build_candidate(settings, "second")
-    run_dbt_build(second)
+    run_spark_build(second)
     import saleor_analytics.pipeline as pipeline
 
     actual_write = pipeline.atomic_json
@@ -275,33 +284,25 @@ def test_validated_release_failure_recovery_and_removed_lines(tmp_path, monkeypa
     assert current_release(settings) == old
     monkeypatch.setattr(pipeline, "atomic_json", actual_write)
     publish_candidate(settings, second)
-    with duckdb.connect(str(second), read_only=True) as conn:
-        assert conn.sql("select count(*) from analytics.analytics.order_lines").fetchone()[0] == 1
-        assert (
-            conn.sql(
-                "select sum(gross_amount) from analytics.analytics.daily_order_metrics"
-            ).fetchone()[0]
-            == 20
-        )
+    assert len(pd.read_parquet(second / "silver/order_lines")) == 1
+    assert pd.read_parquet(second / "gold/daily_order_metrics").gross_amount.sum() == 20
     publish_candidate(settings, second)
     with pytest.raises(RecordError, match="Stale"):
         publish_candidate(settings, first)
-    # Cross-snapshot conflicting version must fail dbt and preserve pointer.
+    # Cross-snapshot conflicting version must fail Spark and preserve pointer.
     conflict = copy.deepcopy(updated)
     conflict["total"]["gross"]["amount"] = "99.00"
     ingest_jsonl(settings, write(tmp_path / "input.jsonl", conflict), "three")
     third = build_candidate(settings, "third")
-    import subprocess
-
-    with pytest.raises(subprocess.CalledProcessError):
-        run_dbt_build(third)
+    with pytest.raises(RecordError, match="conflicting"):
+        run_spark_build(third)
     assert current_release(settings)["release_id"] == "second"
     assert read_json(third.parent / "release.json")["status"] == "failed"
     with pytest.raises(RecordError, match="validated"):
         publish_candidate(settings, third)
     exclude_snapshot(settings, "three", "Synthetic equal-version conflict; retain evidence")
     recovered = build_candidate(settings, "recovered")
-    run_dbt_build(recovered)
+    run_spark_build(recovered)
     publish_candidate(settings, recovered)
     assert current_release(settings)["release_id"] == "recovered"
     with pytest.raises(RecordError, match="current release"):

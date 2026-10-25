@@ -1,5 +1,8 @@
 # Verification record: 2026-09-22
 
+> Historical verification of the earlier DuckDB/dbt implementation. Its
+> commands and results do not validate the current PySpark/Parquet branch.
+
 The original assessment requests a representative production-minded pattern,
 not a fully productionized platform. The evidence below is local execution;
 it does not claim that remote CI, approval policies or a production deployment

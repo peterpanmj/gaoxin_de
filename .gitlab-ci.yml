@@ -14,6 +14,7 @@ stages:
 
 default:
   before_script:
+    - apt-get update && apt-get install -y --no-install-recommends openjdk-17-jre-headless
     - pip install uv
     - uv sync --frozen
 
@@ -27,10 +28,8 @@ python_tests:
   stage: test
   script: uv run pytest -q -m "not integration"
 
-dbt_quality:
+spark_quality:
   stage: data_quality
-  variables:
-    ANALYTICS_DATABASE_PATH: /tmp/analytics.duckdb
   script: uv run pytest -q -m integration
 
 package:

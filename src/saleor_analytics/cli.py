@@ -1,7 +1,7 @@
 """Reusable Click execution interface; requirement mapping uses assessment A-F.
 
 Python owns parsing, normalization, duplicate handling and release control (B).
-dbt owns relational models and data tests (C). Airflow invokes the same functions
+PySpark owns relational models and data checks (C). Airflow invokes the same functions
 (D). See docs/MODERN_DE_DEMO.md for executable scenarios and limitations (F).
 """
 
@@ -22,9 +22,9 @@ from saleor_analytics.pipeline import (
     export_artifacts,
     ingest_jsonl,
     publish_candidate,
-    published_database,
+    published_dataset,
     read_json,
-    run_dbt_build,
+    run_spark_build,
 )
 
 
@@ -132,26 +132,26 @@ def extract_saleor(settings, snapshot_id, mode, backfill_start, backfill_end):
 @click.option("--publish/--no-publish", default=True, show_default=True)
 @click.pass_obj
 def build_warehouse(settings, release_id, publish):
-    """Replay accepted history, run dbt gates and optionally publish (A/B/C/D).
+    """Replay accepted history, run Spark gates and optionally publish (A/B/C/D).
 
     Newest source update wins; equal-time conflicts fail. Complete order line
     sets are selected with their order version. --no-publish still runs all tests.
     Same-release/same-input retries resume; changed inputs need a new release ID.
     Artifacts and lineage remain in releases/RELEASE_ID. Publication atomically
-    commits warehouse/current.json; immutable databases are never overwritten.
+    commits warehouse/current.json; immutable Parquet datasets are never overwritten.
     """
-    database = build_candidate(settings, release_id)
-    run_dbt_build(database)
+    dataset = build_candidate(settings, release_id)
+    run_spark_build(dataset)
     if publish:
-        publish_candidate(settings, database)
-    click.echo(f"{'Published' if publish else 'Validated'} release: {database}")
+        publish_candidate(settings, dataset)
+    click.echo(f"{'Published' if publish else 'Validated'} release: {dataset}")
 
 
 @cli.command("stage-warehouse")
 @click.option("--release-id", required=True)
 @click.pass_obj
 def stage_warehouse(settings, release_id):
-    """Stage approved history without dbt or publication (B/D Airflow boundary)."""
+    """Stage approved history without Gold build or publication (B/D Airflow boundary)."""
     click.echo(str(build_candidate(settings, release_id)))
 
 
@@ -162,7 +162,7 @@ def stage_warehouse(settings, release_id):
 def exclude(settings, snapshot_id, reason):
     """Exclude an unpublished bad snapshot with an audit reason (C/D).
 
-    Use after a cross-snapshot conflict fails dbt. Preserve raw evidence, correct
+    Use after a cross-snapshot conflict fails Spark. Preserve raw evidence, correct
     input, and retry with new IDs. Inputs of the current release cannot be excluded.
     """
     exclude_snapshot(settings, snapshot_id, reason)
@@ -181,7 +181,7 @@ def exclude(settings, snapshot_id, reason):
 )
 @click.pass_obj
 def export_artifacts_command(settings, destination, release_id, all_snapshots):
-    """Copy release, Bronze, quarantine, and dbt evidence for review (A/F).
+    """Copy release, Bronze, quarantine, and Spark evidence for review (A/F).
 
     Creates DESTINATION/RELEASE_ID and never overwrites it. By default it copies
     only the latest source snapshot. --all-snapshots copies the full lineage.
@@ -199,24 +199,24 @@ def export_artifacts_command(settings, destination, release_id, all_snapshots):
 
 
 @cli.command("validate-candidate")
-@click.argument("database", type=click.Path(path_type=Path, exists=True, dir_okay=False))
-def validate_candidate(database):
-    """Build dbt models/tests and retain candidate-specific evidence (C/D)."""
-    run_dbt_build(database)
-    click.echo(f"Validated: {database}")
+@click.argument("dataset", type=click.Path(path_type=Path, exists=True, file_okay=False))
+def validate_candidate(dataset):
+    """Build Spark Silver/Gold tables and retain quality evidence (C/D)."""
+    run_spark_build(dataset)
+    click.echo(f"Validated: {dataset}")
 
 
 @cli.command("publish-candidate")
-@click.argument("database", type=click.Path(path_type=Path, exists=True, dir_okay=False))
+@click.argument("dataset", type=click.Path(path_type=Path, exists=True, file_okay=False))
 @click.pass_obj
-def publish_candidate_command(settings, database):
+def publish_candidate_command(settings, dataset):
     """Publish an unchanged validated candidate from this root (A/C/D).
 
-    Verify dbt evidence, database/source hashes and base-release identity first.
+    Verify Spark evidence, dataset/source hashes and base-release identity first.
     Stale or unvalidated candidates fail. This local gate is not a production
     IAM/approval system (E); protect that separately in CI and deployment.
     """
-    click.echo(str(publish_candidate(settings, database)))
+    click.echo(str(publish_candidate(settings, dataset)))
 
 
 @cli.command("dashboard")
@@ -227,7 +227,7 @@ def dashboard(settings, host, port):
     """Serve currency/channel/date-filtered Gold reports and release status (A/F).
 
     Reload a consistent published release every 30 seconds. Requires current.json
-    from the validated publication flow; legacy overwritten databases are not served.
+    from the validated publication flow; legacy overwritten datasets are not served.
     """
     create_app(settings).run(host=host, port=port)
 
@@ -241,7 +241,7 @@ def status(settings, max_age_hours):
     Publication and source-extraction ages are separate. A fresh file-only release
     has no source watermark; completeness cannot be inferred from timestamp age.
     """
-    _, pointer = published_database(settings)
+    _, pointer = published_dataset(settings)
     metadata = read_json(settings.root / "releases" / pointer["release_id"] / "release.json")
     publication_age = (
         datetime.now(UTC) - datetime.fromisoformat(pointer["published_at"])

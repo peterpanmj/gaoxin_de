@@ -7,7 +7,7 @@ mapping and parameters. Global `--config PATH` comes before the command.
 
 ## Environment setup
 
-Install Python 3.12, uv, and Docker Desktop, and start Docker Desktop. Check
+Install Python 3.12, Java 17+, uv, and Docker Desktop, and start Docker Desktop. Check
 that Git Bash can find each tool:
 
 ```bash
@@ -17,9 +17,13 @@ python --version
 uv --version
 docker version
 docker compose version
+java -version
 ```
 
 Install the locked Python dependencies and verify the CLI:
+
+The first sync downloads a large PySpark distribution; allow extra time and
+disk space. Local Spark runs require Java 17 or later.
 
 ```bash
 uv sync --frozen
@@ -98,14 +102,14 @@ Choose one source path for a run
           build-warehouse --release-id ID
           (Airflow runs these stages separately)
                  |
-                 +--> stage all accepted history in a candidate DuckDB file
-                 +--> dbt builds Silver orders/lines and Gold daily metrics
-                 +--> dbt tests contracts and reconciles metrics
+                 +--> Spark stages accepted history as Parquet
+                 +--> PySpark builds Silver orders/lines and Gold daily metrics
+                 +--> Spark checks contracts and reconciles metrics
                  +--> publish only after validation succeeds
                                |
                                v
-                releases/<release-id>/analytics.duckdb
-                releases/<release-id>/release.json + dbt evidence
+                releases/<release-id>/dataset/{staging,silver,gold}/
+                releases/<release-id>/release.json + quality/results.json
                                |
                                v
                     warehouse/current.json
@@ -126,14 +130,14 @@ Manual review action, outside the daily DAG:
                   |
                   v
   artifacts/<review-name>/<release-id>/
-  portable DuckDB, dbt, Bronze, and quarantine evidence
+  Parquet, Spark quality, Bronze, and quarantine evidence
 ```
 
 `mock-data` writes the JSONL that `ingest-file` reads. For the live path,
 `extract-saleor` reads Saleor through GraphQL and captures its response before
 the same validation path; this project does not query Saleor's PostgreSQL
 database. The mock and Saleor paths use separate data roots during the demo.
-If validation or dbt tests fail, `warehouse/current.json` keeps pointing to
+If validation or Spark checks fail, `warehouse/current.json` keeps pointing to
 the previous successful release.
 
 The daily Airflow DAG wraps the production steps as
@@ -153,9 +157,9 @@ can incorporate several accepted snapshots. The walkthrough happens to use
 |---|---|---|
 | Bronze | `bronze/<snapshot-id>/orders.raw.jsonl`, `orders.accepted.jsonl`, `manifest.json` | Retains the source payload, the normalized accepted rows, and counts/checksums for that ingestion. It is the replay and audit evidence. |
 | Quarantine | `quarantine/<snapshot-id>/orders.rejected.jsonl` | Holds rows that failed the input contract, with rejection details. It can be empty when all rows pass. Excessive rejection fails the ingestion quality gate. |
-| Silver | `orders` and `order_lines` tables inside `releases/<release-id>/analytics.duckdb` | Represents the latest valid version of each order and its matching current line set, with controlled fields and types. This is current state, not one row per historical version. |
-| Gold | `daily_order_metrics` and `daily_product_metrics` tables in the same DuckDB file | Aggregates eligible orders by date, channel, and currency; product metrics also group by SKU/name. Dash reads these tables. |
-| Published release | `releases/<release-id>/release.json`, dbt evidence, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
+| Silver | `releases/<release-id>/dataset/silver/{orders,order_lines}/` Parquet directories | Represents the latest valid version of each order and its matching current line set, with controlled fields and types. This is current state, not one row per historical version. |
+| Gold | `releases/<release-id>/dataset/gold/{daily_order_metrics,daily_product_metrics}/` Parquet directories | Aggregates eligible orders by date, channel, and currency; product metrics also group by SKU/name. Dash reads these datasets with PyArrow. |
+| Published release | `releases/<release-id>/release.json`, `quality/results.json`, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
 
 For an Airflow run, Compose mounts its named `analytics-data` volume at
 `/opt/data` and sets `ANALYTICS_ROOT=/opt/data`. The paths in the table are
@@ -167,9 +171,11 @@ analytics-data volume (mounted at /opt/data)
   bronze/<snapshot-id>/orders.accepted.jsonl
   bronze/<snapshot-id>/manifest.json
   quarantine/<snapshot-id>/orders.rejected.jsonl
-  releases/<release-id>/analytics.duckdb  (Silver and Gold tables)
+  releases/<release-id>/dataset/staging/order_versions/
+  releases/<release-id>/dataset/silver/{orders,order_lines}/
+  releases/<release-id>/dataset/gold/{daily_order_metrics,daily_product_metrics}/
   releases/<release-id>/release.json
-  releases/<release-id>/dbt/run_results.json
+  releases/<release-id>/quality/results.json
   warehouse/current.json                  (active release pointer)
 ```
 
@@ -187,9 +193,8 @@ Host CLI runs use the `ANALYTICS_ROOT` you set in Git Bash. An explicit
 `export-artifacts` command copies selected evidence to the separate host
 `artifacts/` directory, which Compose mounts at `/opt/artifacts`.
 
-DuckDB is the physical warehouse file containing the staging, Silver, and Gold
-tables. Silver and Gold are logical model layers inside that file, not separate
-Parquet directories. `orders.raw.jsonl` remains the original source shape;
+Spark writes the staging, Silver, and Gold datasets as separate Parquet
+directories. `orders.raw.jsonl` remains the original source shape;
 `orders.accepted.jsonl` is the normalized contract used to rebuild the
 warehouse. The quarantine file is retained for inspection, not loaded into
 Silver or Gold.
@@ -282,16 +287,16 @@ expected totals.
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll changes since published checkpoint, with overlap | A/D |
 | `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read an explicit `[start, end)` `updatedAt` interval without moving the incremental watermark | A/B/D |
 | `stage-warehouse --release-id ID` | Build isolated staging tables from approved history | B/D |
-| `validate-candidate DATABASE` | Run dbt models/tests and bind retained evidence to the candidate | C/D |
-| `publish-candidate DATABASE` | Verify evidence and atomically commit release/checkpoint | C/D |
+| `validate-candidate DATASET` | Run Spark models/checks and bind retained evidence to the candidate | C/D |
+| `publish-candidate DATASET` | Verify evidence and atomically commit release/checkpoint | C/D |
 | `build-warehouse --release-id ID` | Stage, validate and publish in one command | B/C/D |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot | A/C/D |
-| `export-artifacts [DESTINATION] [--release-id ID] [--all-snapshots]` | Copy a release and its latest Bronze, quarantine, extraction, and dbt evidence for review | A/F |
+| `export-artifacts [DESTINATION] [--release-id ID] [--all-snapshots]` | Copy a release and its latest Bronze, quarantine, extraction, and Spark evidence for review | A/F |
 | `status --max-age-hours 24` | Print release/count/freshness metadata; fail when stale | D/F |
 | `dashboard` | Query Gold with consistent currency/channel/date filters | A/F |
 
 `build-warehouse --no-publish` validates without changing serving state. Paths for
-explicit validate/publish commands are `ROOT/releases/ID/analytics.duckdb`.
+explicit validate/publish commands are `ROOT/releases/ID/dataset`.
 Use new release IDs when inputs change. Reusing unchanged IDs is retry-safe.
 A stale candidate cannot replace a newer published release.
 
@@ -304,7 +309,7 @@ runtime environment. Source URL is the checkpoint identity; keep it stable.
 
 - Missing published baseline: publish a full extraction before incremental mode.
 - Contract mismatch: use a fresh root and reingest raw input under contract v2.
-- Failed dbt conflict test: correct the source; exclude the unpublished bad
+- Failed Spark conflict check: correct the source; exclude the unpublished bad
   snapshot with a reason, ingest corrected content with new IDs and rebuild.
 - Checksum mismatch: investigate changed evidence; do not bypass the guard.
 - No dashboard data: verify a published release, currency and channel selection.
@@ -335,9 +340,13 @@ contains:
 base/
   export.json
   warehouse/current.json
-  releases/base/analytics.duckdb
+  releases/base/dataset/staging/order_versions/
+  releases/base/dataset/silver/orders/
+  releases/base/dataset/silver/order_lines/
+  releases/base/dataset/gold/daily_order_metrics/
+  releases/base/dataset/gold/daily_product_metrics/
   releases/base/release.json
-  releases/base/dbt/run_results.json
+  releases/base/quality/results.json
   bronze/base/orders.raw.jsonl
   bronze/base/orders.accepted.jsonl
   bronze/base/manifest.json
@@ -348,7 +357,7 @@ The command never overwrites an existing bundle. With no `DESTINATION`, it
 uses `artifacts/` and creates `artifacts/<release-id>/`. To export a specific
 historical or failed candidate, supply `--release-id RELEASE_ID`; a non-active
 release does not include `warehouse/current.json`. Add `--all-snapshots` when
-a reviewer needs complete source lineage. The DuckDB file contains the full
+a reviewer needs complete source lineage. The Parquet dataset contains the full
 release state; the default bundle's latest Bronze snapshot alone cannot
 rebuild it.
 

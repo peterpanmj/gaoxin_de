@@ -15,6 +15,11 @@
 > Mock generation runs locally through the CLI/DAG; it does not mutate Saleor.
 # Assessment coverage and implementation review
 
+> Historical audit of the earlier DuckDB/dbt implementation. The current
+> PySpark/Parquet design is described in [DEMO_DESIGN.md](../DEMO_DESIGN.md)
+> and [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md). Do not use the
+> findings below as the current branch's verification status.
+
 Reviewed on 2026-09-22 against `Principal_Data_Engineer_Candidate_Take_Home.md`,
 sections A-F, and implementation baseline `1c86a14`. The original brief is the
 acceptance reference; the agreed flexible implementation timeframe supersedes

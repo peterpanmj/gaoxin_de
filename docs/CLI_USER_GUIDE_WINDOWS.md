@@ -8,12 +8,12 @@ environment and `saleor-analytics` is the Click CLI.
 The [end-to-end flow diagram](CLI_USER_GUIDE.md#end-to-end-demo-flow) shows
 where mock JSONL and Saleor GraphQL ingestion meet and how a release reaches
 Dash. The [layer results](CLI_USER_GUIDE.md#what-each-layer-produces) section
-explains the Bronze, quarantine, Silver, Gold, and DuckDB outputs for either
+explains the Bronze, quarantine, Silver, Gold, and Parquet outputs for either
 shell.
 
 ## Environment setup
 
-Install Python 3.12, Docker Desktop, and uv. Start Docker Desktop before using
+Install Python 3.12, Java 17+, Docker Desktop, and uv. Start Docker Desktop before using
 Compose. If uv is missing, install it with Windows Package Manager:
 
 ```powershell
@@ -23,6 +23,9 @@ winget install --id=astral-sh.uv -e
 Open a new PowerShell terminal after installation. From the repository root,
 verify the tools, install locked dependencies, and check the CLI:
 
+The first sync downloads a large PySpark distribution. Local Spark runs require
+Java 17 or later.
+
 ```powershell
 $repoRoot = 'C:\path\to\<repository-folder>'
 Set-Location $repoRoot
@@ -30,6 +33,7 @@ python --version
 uv --version
 docker version
 docker compose version
+java -version
 uv sync --frozen
 uv run saleor-analytics doctor
 ```
@@ -68,7 +72,7 @@ for the distinction between Docker Desktop pulls and image builds.
 ## Mock-data ingestion walkthrough
 
 Use a fresh root for each rehearsal. The commands below create a local JSONL
-file, capture it in Bronze, run dbt, publish a DuckDB release, and start Dash:
+file, capture it in Bronze, run PySpark, publish a Parquet release, and start Dash:
 
 ```powershell
 $demoSession = [guid]::NewGuid().ToString('N')
@@ -138,7 +142,7 @@ and use new snapshot and release IDs for another attempt.
 | `extract-saleor --snapshot-id ID --mode full` | Capture a paginated API snapshot. |
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll source updates since the published checkpoint. |
 | `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read a historical `[start, end)` `updatedAt` interval without moving the checkpoint. |
-| `build-warehouse --release-id ID` | Stage, dbt validate, and publish a release. |
+| `build-warehouse --release-id ID` | Stage, Spark validate, and publish a release. |
 | `stage-warehouse`, `validate-candidate`, `publish-candidate` | Run those release steps separately. |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot. |
 | `status --max-age-hours 24` | Report release and extraction freshness. |
@@ -160,8 +164,8 @@ docker compose -f infra/airflow/compose.yml ps
 docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
 ```
 
-The export does not overwrite an existing bundle. It includes the DuckDB
-release, dbt evidence, and the latest Bronze snapshot.
+The export does not overwrite an existing bundle. It includes the Parquet
+release, Spark quality evidence, and the latest Bronze snapshot.
 
 For a separate dated review copy, pass a destination inside the mapped
 `/opt/artifacts` directory. The bundle then appears under the host's

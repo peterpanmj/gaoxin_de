@@ -1,7 +1,7 @@
 """Replayable ingestion and validated publication (assessment A/B/C/D).
 
 File locks serialize local writers. A single atomic pointer commits the immutable
-serving database and extraction watermarks. Checksums detect accidental changes;
+Parquet release and extraction watermarks. Checksums detect accidental changes;
 they are not a security boundary against writers with filesystem access.
 """
 
@@ -9,19 +9,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
-import duckdb
 from filelock import FileLock
 
 from saleor_analytics.common import atomic_json, digest, identifier, now
 from saleor_analytics.config import Settings
 from saleor_analytics.records import CONTRACT_VERSION, RecordError, normalize_order
+from saleor_analytics.spark_engine import build_and_validate, session, stage_accepted
 
 
 def read_json(path: Path) -> dict:
@@ -46,14 +44,30 @@ def current_release(settings: Settings) -> dict:
     return read_json(path) if path.exists() else {}
 
 
-def published_database(settings: Settings) -> tuple[Path, dict]:
+def dataset_digest(directory: Path) -> str:
+    """Bind a release to every Parquet dataset file and its relative path."""
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Release dataset not found: {directory}")
+    files = sorted(path for path in directory.rglob("*") if path.is_file())
+    if not files:
+        raise RecordError("Release dataset is empty")
+    value = hashlib.sha256()
+    for path in files:
+        value.update(path.relative_to(directory).as_posix().encode())
+        value.update(digest(path).encode())
+    return value.hexdigest()
+
+
+def published_dataset(settings: Settings) -> tuple[Path, dict]:
     """Resolve one consistent serving release and reject altered contents."""
     pointer = current_release(settings)
     if not pointer:
         raise FileNotFoundError("No validated release; run build-warehouse first")
-    path = settings.root / "releases" / identifier(pointer["release_id"]) / "analytics.duckdb"
-    if digest(path) != pointer["database_sha256"]:
-        raise RecordError("Published database checksum mismatch")
+    if "dataset_sha256" not in pointer:
+        raise RecordError("Legacy warehouse release; publish a new Spark release before serving")
+    path = settings.root / "releases" / identifier(pointer["release_id"]) / "dataset"
+    if dataset_digest(path) != pointer["dataset_sha256"]:
+        raise RecordError("Published dataset checksum mismatch")
     return path, pointer
 
 
@@ -268,7 +282,7 @@ def build_candidate(settings: Settings, release_id: str) -> Path:
     """Stage approved version history and provenance; same-input retry resumes (A/B/D)."""
     release_id = identifier(release_id)
     directory = settings.root / "releases" / release_id
-    database = directory / "analytics.duckdb"
+    dataset = directory / "dataset"
     with root_lock(settings), FileLock(str(settings.root / f".release-{release_id}.lock")):
         inputs = approved_inputs(settings)
         if not inputs:
@@ -288,61 +302,16 @@ def build_candidate(settings: Settings, release_id: str) -> Path:
             old = read_json(metadata_path)
             if old["input_signature"] != signature:
                 raise RecordError("Release ID belongs to different inputs; use a new ID")
-            if database.exists():
-                return database
+            if (dataset / "staging/order_versions/_SUCCESS").exists():
+                return dataset
         directory.mkdir(parents=True, exist_ok=True)
         if current_release(settings).get("release_id") == release_id:
             raise RecordError("Cannot rebuild a published release")
-        with duckdb.connect(str(database)) as connection:
-            connection.execute("drop schema if exists analytics cascade")
-            connection.execute(
-                "create or replace table stg_order_versions (snapshot_id varchar, "
-                "order_id varchar, order_number varchar, created_at timestamp, "
-                "updated_at timestamp, status varchar, channel varchar, currency varchar, "
-                "total_amount decimal(18,2), payload_json varchar, payload_hash varchar)"
-            )
-            connection.execute(
-                "create or replace table stg_order_line_versions (snapshot_id varchar, "
-                "order_id varchar, line_id varchar, product_name varchar, sku varchar, "
-                "quantity integer, unit_amount decimal(18,2), line_amount decimal(18,2), "
-                "payload_hash varchar)"
-            )
-            for manifest in inputs:
-                path = settings.root / "bronze" / manifest["snapshot_id"] / "orders.accepted.jsonl"
-                for line in path.read_text(encoding="utf-8").splitlines():
-                    order = json.loads(line)
-                    payload = fingerprint(order)
-                    connection.execute(
-                        "insert into stg_order_versions values (?,?,?,?,?,?,?,?,?,?,?)",
-                        [
-                            manifest["snapshot_id"],
-                            order["order_id"],
-                            order["order_number"],
-                            order["created_at"],
-                            order["updated_at"],
-                            order["status"],
-                            order["channel"],
-                            order["currency"],
-                            order["total_amount"],
-                            json.dumps(order, sort_keys=True),
-                            payload,
-                        ],
-                    )
-                    for item in order["lines"]:
-                        connection.execute(
-                            "insert into stg_order_line_versions values (?,?,?,?,?,?,?,?,?)",
-                            [
-                                manifest["snapshot_id"],
-                                order["order_id"],
-                                item["line_id"],
-                                item["product_name"],
-                                item["sku"],
-                                item["quantity"],
-                                item["unit_amount"],
-                                item["line_amount"],
-                                payload,
-                            ],
-                        )
+        spark = session()
+        try:
+            stage_accepted(spark, settings.root, inputs, dataset)
+        finally:
+            spark.stop()
         atomic_json(
             metadata_path,
             {
@@ -355,70 +324,38 @@ def build_candidate(settings: Settings, release_id: str) -> Path:
                 "contract_version": CONTRACT_VERSION,
             },
         )
-    return database
+    return dataset
 
 
-def run_dbt_build(database: Path) -> None:
-    """Run dbt and bind retained test evidence to candidate bytes (B/C/D)."""
-    directory = database.resolve().parent
+def run_spark_build(dataset: Path) -> None:
+    """Build Silver/Gold Parquet and bind Spark quality evidence to candidate bytes."""
+    directory = dataset.resolve().parent
     root = directory.parent.parent
     release_id = identifier(directory.name)
     with FileLock(str(root / f".release-{release_id}.lock"), timeout=60):
         metadata = read_json(directory / "release.json")
-        if metadata.get("status") == "validated" and metadata.get("database_sha256") == digest(
-            database
-        ):
+        if metadata.get("status") == "validated":
+            if metadata.get("dataset_sha256") != dataset_digest(dataset):
+                raise RecordError("Validated candidate dataset checksum mismatch")
             return
         if current_release(Settings(root)).get("release_id") == release_id:
             raise RecordError("Cannot mutate a published release")
-        project = Path(__file__).resolve().parents[2] / "analytics"
-        if not project.is_dir():
-            project = Path(__file__).resolve().parent / "dbt"
-        artifacts = directory / "dbt"
-        environment = os.environ | {
-            "ANALYTICS_DATABASE_PATH": str(database.resolve()),
-            "DBT_SEND_ANONYMOUS_USAGE_STATS": "false",
-        }
+        model = Path(__file__).resolve().parent / "spark_engine.py"
+        evidence = directory / "quality/results.json"
         metadata["status"] = "validating"
-        metadata["model_checksums"] = {
-            str(path.relative_to(project)): digest(path)
-            for path in sorted(project.rglob("*"))
-            if path.is_file()
-            and path.suffix in {".sql", ".yml"}
-            and not any(part in {"target", "logs"} for part in path.relative_to(project).parts)
-            and path.name != ".user.yml"
-        }
+        metadata["model_checksums"] = {"spark_engine.py": digest(model)}
         atomic_json(directory / "release.json", metadata)
         started = time.monotonic()
         try:
-            subprocess.run(
-                [
-                    "dbt",
-                    "build",
-                    "--project-dir",
-                    str(project),
-                    "--profiles-dir",
-                    str(project),
-                    "--target",
-                    "candidate",
-                    "--target-path",
-                    str(artifacts),
-                    "--log-path",
-                    str(directory / "logs"),
-                ],
-                check=True,
-                env=environment,
-            )
-            results = read_json(artifacts / "run_results.json")["results"]
-            if not results or any(row["status"] not in {"success", "pass"} for row in results):
-                raise RecordError("dbt results contain unsuccessful resources")
-            tests = sum(row["unique_id"].startswith("test.") for row in results)
-            if tests < 7:
-                raise RecordError("Required data-test evidence missing")
+            spark = session()
+            try:
+                tests = build_and_validate(spark, dataset, evidence)
+            finally:
+                spark.stop()
             metadata.update(
                 status="validated",
-                database_sha256=digest(database),
-                results_sha256=digest(artifacts / "run_results.json"),
+                dataset_sha256=dataset_digest(dataset),
+                results_sha256=digest(evidence),
                 validated_at=now(),
                 data_tests_passed=tests,
                 duration_seconds=round(time.monotonic() - started, 3),
@@ -430,25 +367,25 @@ def run_dbt_build(database: Path) -> None:
         atomic_json(directory / "release.json", metadata)
 
 
-def publish_candidate(settings: Settings, database: Path) -> Path:
+def publish_candidate(settings: Settings, dataset: Path) -> Path:
     """Validate provenance and atomically commit release plus watermarks (C/D).
 
     Foreign, altered and stale candidates fail. Publication never rewrites a
-    database being read. Same-release retries are no-ops.
+    dataset being read. Same-release retries are no-ops.
     """
-    database = database.resolve()
-    release_id = identifier(database.parent.name)
-    expected = (settings.root / "releases" / release_id / "analytics.duckdb").resolve()
-    if database != expected:
+    dataset = dataset.resolve()
+    release_id = identifier(dataset.parent.name)
+    expected = (settings.root / "releases" / release_id / "dataset").resolve()
+    if dataset != expected:
         raise RecordError("Candidate must belong to this data root")
     with root_lock(settings), FileLock(str(settings.root / f".release-{release_id}.lock")):
-        metadata = read_json(database.parent / "release.json")
-        if metadata.get("status") != "validated" or metadata.get("database_sha256") != digest(
-            database
-        ):
-            raise RecordError("Publication requires an unchanged dbt-validated candidate")
-        if metadata.get("results_sha256") != digest(database.parent / "dbt/run_results.json"):
-            raise RecordError("dbt evidence checksum mismatch")
+        metadata = read_json(dataset.parent / "release.json")
+        if metadata.get("status") != "validated" or metadata.get(
+            "dataset_sha256"
+        ) != dataset_digest(dataset):
+            raise RecordError("Publication requires an unchanged Spark-validated candidate")
+        if metadata.get("results_sha256") != digest(dataset.parent / "quality/results.json"):
+            raise RecordError("Spark quality evidence checksum mismatch")
         for item in metadata["inputs"]:
             path = settings.root / "bronze" / item["snapshot_id"]
             verify_snapshot(path)
@@ -460,7 +397,7 @@ def publish_candidate(settings: Settings, database: Path) -> Path:
             raise RecordError("Candidate includes an excluded snapshot")
         previous = current_release(settings)
         if previous.get("release_id") == release_id:
-            return database
+            return dataset
         if previous.get("release_id") != metadata["base_release"]:
             raise RecordError("Stale candidate; build a new release from the current base")
         watermarks = dict(previous.get("watermarks", {}))
@@ -471,7 +408,7 @@ def publish_candidate(settings: Settings, database: Path) -> Path:
                 watermarks[source] = max(watermarks.get(source, ""), upper)
         pointer = {
             "release_id": release_id,
-            "database_sha256": metadata["database_sha256"],
+            "dataset_sha256": metadata["dataset_sha256"],
             "published_at": now(),
             "watermarks": watermarks,
             "data_tests_passed": metadata["data_tests_passed"],
@@ -481,4 +418,4 @@ def publish_candidate(settings: Settings, database: Path) -> Path:
             "duplicate_count": sum(x.get("duplicate_count", 0) for x in metadata["inputs"]),
         }
         atomic_json(settings.root / "warehouse/current.json", pointer)
-    return database
+    return dataset

@@ -2,7 +2,7 @@
 
 This repository is a Principal Data Engineer interview demo. It accepts
 Saleor-shaped JSONL or Saleor GraphQL orders, validates and stores raw input in
-Bronze, builds Silver and Gold models in DuckDB with dbt, publishes a validated
+Bronze, builds Silver and Gold Parquet datasets with PySpark, publishes a validated
 release, and serves it with Plotly Dash. Airflow provides the daily workflow.
 The project and this handoff are in English.
 
@@ -20,7 +20,7 @@ The project and this handoff are in English.
 
 ## Set up a fresh Windows PC
 
-Install Git with Git Bash, Python 3.12, `uv`, and Docker Desktop with Linux
+Install Git with Git Bash, Python 3.12, Java 17+, `uv`, and Docker Desktop with Linux
 containers. Docker is needed for Airflow and Saleor, but not for the local
 mock-to-Dash path. Authenticate GitHub before cloning the private repository.
 In Git Bash:
@@ -64,7 +64,7 @@ Open `http://localhost:8050`. The default dataset should show 20 orders and
 USD 400 gross order value. Press Ctrl+C in Git Bash to stop the dashboard.
 The local output is under the chosen `var/handoff-*` directory; its
 `warehouse/current.json` points to the published release. See the
-[CLI guide](docs/CLI_USER_GUIDE.md) for Bronze, quarantine, release, and dbt
+[CLI guide](docs/CLI_USER_GUIDE.md) for Bronze, quarantine, release, and Spark
 evidence paths.
 
 ## Airflow demonstration
@@ -105,7 +105,7 @@ volume first. Stop Airflow without deleting its volumes with
 
 ## What Git does and does not move
 
-Git transfers code, documentation, DAGs, dbt models, tests, and the lockfile.
+Git transfers code, documentation, DAGs, Spark transformations, tests, and the lockfile.
 It does **not** transfer ignored `var/`, `artifacts/`, `.venv/`, local `.env*`
 files, credentials, presentation `.pptx` files, or Docker named volumes. The
 Airflow `analytics-data` volume is mounted at `/opt/data` in the container;
@@ -122,10 +122,10 @@ For further changes, branch from up-to-date `main`, run the checks in
 ## Interview boundaries
 
 The implemented incremental path polls Saleor by `updatedAt` with overlap;
-it is not database log CDC and cannot reliably detect hard deletes. dbt
+it is not database log CDC and cannot reliably detect hard deletes. Spark
 rebuilds current Silver and Gold models from accepted history at this demo
-scale. Silver and Gold are DuckDB tables; a Parquet analytical export and
-Spark execution are future work. The GitHub Actions pipeline validates the
+scale. Silver and Gold are Parquet datasets; local Spark execution does not
+demonstrate multi-node scaling. The GitHub Actions pipeline validates the
 project; its manual production job illustrates promotion and is not an
 operational deployment. See [assessment review](docs/ASSESSMENT_REVIEW.md)
 for the requirement mapping and remaining limits.
