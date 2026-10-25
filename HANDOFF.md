@@ -2,7 +2,7 @@
 
 This repository is a Principal Data Engineer interview demo. It accepts
 Saleor-shaped JSONL or Saleor GraphQL orders, validates and stores raw input in
-Bronze, builds Silver and Gold models in DuckDB with dbt, publishes a validated
+Bronze, builds Silver and Gold Parquet datasets with PySpark, publishes a validated
 release, and serves it with Plotly Dash. Airflow provides the daily workflow.
 The project and this handoff are in English.
 
@@ -10,9 +10,13 @@ The project and this handoff are in English.
 
 - Remote: `https://github.com/peterpanmj/gaoxin_de.git` (private; sign in to
   GitHub on the new PC).
-- PR #6, which added Git Bash commands to the guides, is merged into `main`.
-- The source of truth for continuing on another PC is the remote `main` branch
-  after this handoff change is merged. Check `git status` before making changes.
+- This handoff describes `codex/pyspark-analytics`, the PySpark/Parquet branch.
+  PR #12 targets the separate `codex/pyspark-integration` branch. Check out the
+  feature branch while review is in progress, or the integration branch after
+  it is merged there. This merge does not update `main`. Check `git status`
+  before switching branches or making changes.
+- Commit and push intended edits before moving PCs; uncommitted files and local
+  runtime dependencies do not transfer with a clone.
 - Start with [README.md](README.md), [DEMO_DESIGN.md](DEMO_DESIGN.md),
   [Git Bash CLI guide](docs/CLI_USER_GUIDE.md), and
   [Windows CLI guide](docs/CLI_USER_GUIDE_WINDOWS.md). The
@@ -20,13 +24,13 @@ The project and this handoff are in English.
 
 ## Set up a fresh Windows PC
 
-Install Git with Git Bash, Python 3.12, `uv`, and Docker Desktop with Linux
+Install Git with Git Bash, Python 3.12, Java 17+, `uv`, and Docker Desktop with Linux
 containers. Docker is needed for Airflow and Saleor, but not for the local
 mock-to-Dash path. Authenticate GitHub before cloning the private repository.
 In Git Bash:
 
 ```bash
-git clone --recurse-submodules https://github.com/peterpanmj/gaoxin_de.git
+git clone --branch codex/pyspark-analytics --recurse-submodules https://github.com/peterpanmj/gaoxin_de.git
 cd gaoxin_de
 git status
 # First setup only; this downloads the versions pinned in uv.lock.
@@ -40,11 +44,31 @@ the existing cache; it fails quickly when a required package is missing. A
 second simultaneous sync waits for uv's environment/cache lock, so cancel the
 duplicate rather than waiting for both.
 
-The submodule is the pinned upstream Saleor development stack. If the clone
-already exists, use `git pull --ff-only` on `main` and
-`git submodule update --init --recursive`. Run project commands from the
+The submodule is the pinned upstream Saleor development stack. For an existing
+clean clone, run `git fetch origin`, `git switch codex/pyspark-analytics`,
+`git pull --ff-only`, and `git submodule update --init --recursive`.
+Run project commands from the
 repository root. Use `uv run saleor-analytics --help` and a command's `--help`
 for CLI parameters.
+
+## Test on the new PC
+
+Run tests inside the Linux container rather than configuring native Windows
+Spark/Hadoop just for testing. After cloning, only Docker Desktop with Linux
+containers is required for these checks. Run from the repository root in either
+PowerShell or Git Bash:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Continue only if the image build succeeds. Expected: `23 passed` and exit code
+`0`. Rebuild after code, tests, or locks change. The test runner shares the
+Airflow runtime base, adds test tools, and uses disposable data without demo
+volume mounts. Neither prior test results nor an older Airflow image on another
+PC replace this check. See [the testing guide](docs/TESTING.md) for focused runs
+and lint commands. Host Python/Java/uv setup is only needed for native CLI use.
 
 ## Quick repeatable demo without Docker
 
@@ -64,7 +88,7 @@ Open `http://localhost:8050`. The default dataset should show 20 orders and
 USD 400 gross order value. Press Ctrl+C in Git Bash to stop the dashboard.
 The local output is under the chosen `var/handoff-*` directory; its
 `warehouse/current.json` points to the published release. See the
-[CLI guide](docs/CLI_USER_GUIDE.md) for Bronze, quarantine, release, and dbt
+[CLI guide](docs/CLI_USER_GUIDE.md) for Bronze, quarantine, release, and Spark
 evidence paths.
 
 ## Airflow demonstration
@@ -105,7 +129,7 @@ volume first. Stop Airflow without deleting its volumes with
 
 ## What Git does and does not move
 
-Git transfers code, documentation, DAGs, dbt models, tests, and the lockfile.
+Git transfers code, documentation, DAGs, Spark transformations, tests, and the lockfile.
 It does **not** transfer ignored `var/`, `artifacts/`, `.venv/`, local `.env*`
 files, credentials, presentation `.pptx` files, or Docker named volumes. The
 Airflow `analytics-data` volume is mounted at `/opt/data` in the container;
@@ -116,16 +140,18 @@ bundle restores the Airflow volume: `export-artifacts` copies evidence for
 inspection, not a complete runtime backup.
 
 Never commit local credentials, proxy settings, runtime data, or prompt logs.
-For further changes, branch from up-to-date `main`, run the checks in
-[README.md](README.md#validation-and-delivery), and open a pull request.
+Continue the Spark work on `codex/pyspark-analytics` until it is merged into
+`codex/pyspark-integration`. Base later Spark changes on the updated integration
+branch; use up-to-date `main` for work on the original implementation. Run the checks in
+[README.md](README.md#validation-and-delivery) before opening or updating a PR.
 
 ## Interview boundaries
 
 The implemented incremental path polls Saleor by `updatedAt` with overlap;
-it is not database log CDC and cannot reliably detect hard deletes. dbt
+it is not database log CDC and cannot reliably detect hard deletes. Spark
 rebuilds current Silver and Gold models from accepted history at this demo
-scale. Silver and Gold are DuckDB tables; a Parquet analytical export and
-Spark execution are future work. The GitHub Actions pipeline validates the
+scale. Silver and Gold are Parquet datasets; local Spark execution does not
+demonstrate multi-node scaling. The GitHub Actions pipeline validates the
 project; its manual production job illustrates promotion and is not an
-operational deployment. See [assessment review](docs/ASSESSMENT_REVIEW.md)
+operational deployment. See [assessment coverage](docs/ASSESSMENT_REVIEW.md)
 for the requirement mapping and remaining limits.

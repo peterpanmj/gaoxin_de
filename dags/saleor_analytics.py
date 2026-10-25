@@ -79,7 +79,7 @@ def saleor_analytics_daily():
             "batch": batch,
             "file": str(path) if generate or params["input_mode"] == "fixture" else None,
             "extract_mode": params["extract_mode"],
-            "database": str(root / "releases" / batch / "analytics.duckdb"),
+            "dataset": str(root / "releases" / batch / "dataset"),
         }
 
     @task(retries=2, retry_delay=timedelta(seconds=10))
@@ -95,20 +95,20 @@ def saleor_analytics_daily():
 
     @task(retries=1, retry_delay=timedelta(seconds=10))
     def stage(batch):
-        """Build a candidate DuckDB release from all approved Bronze snapshots."""
+        """Stage a candidate Parquet release from all approved Bronze snapshots."""
         command("stage-warehouse", "--release-id", batch["batch"])
         return batch
 
     @task
     def transform_and_test(batch):
-        """Run dbt models and data tests against the candidate release."""
-        command("validate-candidate", batch["database"])
+        """Run PySpark Silver/Gold transformations and quality checks."""
+        command("validate-candidate", batch["dataset"])
         return batch
 
     @task(retries=1, retry_delay=timedelta(seconds=10))
     def publish(batch):
         """Atomically publish a checksum-validated candidate release and watermark state."""
-        command("publish-candidate", batch["database"])
+        command("publish-candidate", batch["dataset"])
         return batch
 
     @task

@@ -7,7 +7,14 @@ It is not a time-boxed checklist. The implementation was planned for roughly
 write-up are separate work.
 
 **Stack:** Saleor-compatible GraphQL extraction, local JSONL mock data, Python,
-Click, DuckDB, dbt, Plotly Dash, Airflow, Docker Compose, uv, and GitHub Actions.
+Click, PySpark, Parquet, Plotly Dash, Airflow, Docker Compose, uv, and GitHub Actions.
+
+This document describes `codex/pyspark-analytics`. PySpark DataFrame code in
+`spark_engine.py` replaces the former dbt models and DuckDB execution/storage.
+The analytical outputs are Parquet directories; Dash reads Gold through
+pandas/PyArrow. CLI command names and Airflow stage boundaries are retained.
+Implemented behavior and executed runtime evidence are separate; see the
+[current verification record](docs/VERIFICATION.md) for passing and pending checks.
 
 ## 1. Delivered scope
 
@@ -18,8 +25,8 @@ Click, DuckDB, dbt, Plotly Dash, Airflow, Docker Compose, uv, and GitHub Actions
 | Synthetic scenarios | Implemented | Deterministic `baseline`, `update`, `duplicate`, and `invalid` local JSONL scenarios; no mutation of Saleor. | `src/saleor_analytics/mock.py` |
 | Bronze and quarantine | Implemented | Raw and accepted JSONL, manifests, checksums, rejection evidence, and replayable snapshots. | `pipeline.py`, runtime `bronze/` and `quarantine/` |
 | Contract and normalization | Implemented | Controlled v2 order contract, UTC timestamps, decimal money, canonical line items, duplicate collapse, and conflict failure. | `records.py` |
-| DuckDB and dbt | Implemented | Candidate DuckDB warehouse, Silver current-state tables, Gold daily order/product metrics, dbt tests. | `analytics/`, `pipeline.py` |
-| Publication and lineage | Implemented | Immutable release directories and atomic `warehouse/current.json` pointer after dbt validation. | `pipeline.py` |
+| Spark and Parquet | Implemented | Candidate Parquet staging, PySpark Silver current-state datasets, Gold daily order/product metrics, and 11 quality checks. | `spark_engine.py`, `pipeline.py` |
+| Publication and lineage | Implemented | Immutable release directories and atomic `warehouse/current.json` pointer after Spark validation. | `pipeline.py` |
 | Orchestration | Implemented | Daily Airflow DAG with retries, manual mock controls, quality-gated publication, and freshness monitoring. | `dags/saleor_analytics.py` |
 | Dashboard | Implemented | Currency/channel/date filters, KPIs, Gold trend and product charts, release/quality status, single-day markers. | `dashboard.py` |
 | Artifact export | Implemented | CLI export of a release and latest snapshot by default; `--all-snapshots` exports full source lineage. | `export-artifacts` command |
@@ -33,8 +40,8 @@ Saleor GraphQL or mock JSONL
   → raw Bronze capture
   → Python contract, normalization, deduplication, quarantine
   → accepted Bronze snapshot and manifest
-  → isolated DuckDB candidate
-  → dbt Silver and Gold models plus data tests
+  → isolated Spark staging Parquet
+  → PySpark Silver and Gold datasets plus quality checks
   → immutable validated release
   → current.json pointer
   → Dash dashboard and artifact export
@@ -46,13 +53,13 @@ Airflow invokes the same CLI boundaries in this order:
 prepare → extract_and_validate → stage → transform_and_test → publish → monitor
 ```
 
-Publication happens only after dbt validation succeeds. A failed run retains the
+Publication happens only after Spark validation succeeds. A failed run retains the
 previous release and its checkpoint for dashboard consumers.
 
 For a historical repair, `extract-saleor --mode backfill --start UTC --end UTC`
 reads the explicit start-inclusive/end-exclusive `[start, end)` `updatedAt`
 window into a new Bronze snapshot. Operators then build a new release through
-the ordinary dbt and publication gates. This keeps historical reprocessing
+the ordinary Spark and publication gates. This keeps historical reprocessing
 separate from incremental watermark advancement.
 
 ## 3. Validation and acceptance evidence
@@ -65,20 +72,27 @@ The validation strategy is deliberately layered:
 | Ingestion quality gate | Exact duplicates collapse; same-version differing payloads fail; invalid records quarantine; reject rate must remain within the configured limit. |
 | Backfill guardrails | Both UTC bounds are required; start must precede end; `[start, end)` filtering is enforced locally because the Saleor API upper filter is inclusive; backfills do not advance the incremental watermark. |
 | Artifact integrity | Contract version plus SHA-256 verification of raw and accepted snapshots. |
-| dbt | Keys, relationships, accepted currencies, line/order contracts, conflicting versions, and Gold-to-Silver metric reconciliation. |
-| Release gate | A candidate requires successful dbt results and matching checksums before publication. |
+| PySpark | Current-order/line keys and contracts, conflicting versions, and Gold-to-Silver metric reconciliation. |
+| Release gate | A candidate requires successful Spark check results and matching checksums before publication. |
 | Operations | `status --max-age-hours 24` reports release/extraction freshness; Airflow records task outcomes and retries. |
 | CI | `ruff format --check`, `ruff check`, pytest, package build, and artifact upload for pull requests and `main`. |
 
-Run the local checks with:
+Run the developer checks inside the Linux test container from the repository
+root. These commands work in PowerShell and Git Bash and need Docker, without
+host Python/Java/Hadoop setup:
 
 ```bash
-uv sync --frozen
-uv run ruff format --check src tests dags
-uv run ruff check src tests dags
-uv run pytest -q
-uv build
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests ruff format --check src tests dags
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests ruff check src tests dags
 ```
+
+Run only after a successful build; rebuild when code or dependencies change.
+The test runner uses disposable temporary data and mounts no demo volumes.
+See [the testing guide](docs/TESTING.md) for expected results and focused runs.
+GitHub Actions runs the suite directly on Ubuntu and additionally builds a
+package; this does not verify a Docker image build.
 
 ## 4. Presentation workflow
 
@@ -110,10 +124,10 @@ paths, and business definitions.
 
 | Trigger or need | Next implementation step |
 |---|---|
-| More source volume | Move retained source data to object storage and process incremental partitions or Parquet files. |
+| More source volume | Move retained source data to object storage and process incremental partitions instead of full replay. |
 | Near-real-time updates or deletes | Use durable event/log CDC with tombstones; `updatedAt` polling cannot capture hard deletes or every intermediate mutation. |
 | Historical source reconstruction | Add source-native snapshots or CDC/event retention. Date-range backfill re-reads the current API by `updatedAt`; it is not an as-of query and cannot restore hard-deleted data. |
-| Multiple consumers or large analytical workloads | Move the same dbt models to a managed warehouse or governed lakehouse. |
+| Multiple consumers or large analytical workloads | Move Parquet tables to a governed lakehouse/catalog and operate a multi-node Spark cluster. |
 | Full artifact reproducibility by default | Export all snapshots by default or make the export an atomic, locked copy operation. The current default export is an inspection bundle containing the latest snapshot. |
 | Automated deployment | Build and publish a versioned container image, configure a deployment target, and protect promotion with GitHub environment reviewers. |
 | Production security | Add IAM, secret management, encryption, retention controls, access auditing, and alert delivery. |
@@ -123,9 +137,9 @@ paths, and business definitions.
 
 | Assessment area | Current repository evidence |
 |---|---|
-| A. Architecture and design | [DEMO_DESIGN.md](DEMO_DESIGN.md), `analytics/`, Bronze/Silver/Gold/release workflow. |
+| A. Architecture and design | [DEMO_DESIGN.md](DEMO_DESIGN.md), `spark_engine.py`, Bronze/Silver/Gold/release workflow. |
 | B. Python programming | `src/saleor_analytics/`, Click CLI, contract normalization, extraction, and tests. |
-| C. Quality and testing | Python contract checks, dbt models/tests, quarantine, integrity checks, and pytest. |
+| C. Quality and testing | Python contract checks, Spark model checks, quarantine, integrity checks, and pytest. |
 | D. Orchestration and operations | `dags/saleor_analytics.py`, `infra/airflow/compose.yml`, freshness status command, and presentation launcher. |
 | E. CI/CD | `.github/workflows/`, locked dependency installation, automated validation, package build, and illustrative promotion job. |
 | F. Documentation | README, design, CLI guide, operations guide, modern demo guide, verification report, and this document. |

@@ -2,23 +2,23 @@
 
 from datetime import UTC, datetime
 
-import duckdb
 import pandas as pd
 import plotly.express as px
 from dash import Dash, Input, Output, dcc, html
 
 from saleor_analytics.config import Settings
-from saleor_analytics.pipeline import published_database
+from saleor_analytics.pipeline import published_dataset
 
 
 def load_report(settings: Settings):
     """Resolve one release once per refresh and read both models from it."""
-    path, pointer = published_database(settings)
-    with duckdb.connect(str(path), read_only=True) as connection:
-        daily = connection.sql("select * from analytics.analytics.daily_order_metrics").fetchdf()
-        products = connection.sql(
-            "select * from analytics.analytics.daily_product_metrics"
-        ).fetchdf()
+    path, pointer = published_dataset(settings)
+    daily = pd.read_parquet(path / "gold/daily_order_metrics")
+    products = pd.read_parquet(path / "gold/daily_product_metrics")
+    for frame in (daily, products):
+        frame["order_date"] = pd.to_datetime(frame["order_date"])
+        frame["gross_amount"] = pd.to_numeric(frame["gross_amount"]).astype(float)
+    daily["average_order_value"] = pd.to_numeric(daily["average_order_value"]).astype(float)
     return daily, products, pointer
 
 
@@ -40,7 +40,7 @@ def filter_report(daily, products, currency, channels, start, end):
 
 
 def create_app(settings: Settings) -> Dash:
-    """Build the Dash application backed by the currently published DuckDB release."""
+    """Build the Dash application backed by the currently published Gold Parquet release."""
     daily, _, _ = load_report(settings)
     currencies = sorted(daily.currency.unique())
     channels = sorted(daily.channel.unique())
@@ -130,7 +130,7 @@ def create_app(settings: Settings) -> Dash:
             f"Release: {pointer['release_id']} | published: {pointer['published_at']}\n"
             f"Publication age: {age / 3600:.1f}h | "
             f"{'STALE (>24h)' if age > 86400 else 'within 24h'}\n"
-            f"dbt tests passed: {pointer['data_tests_passed']} | "
+            f"Spark checks passed: {pointer['data_tests_passed']} | "
             f"input rejects: {pointer['rejected_count']} | "
             f"duplicates collapsed: {pointer['duplicate_count']}\n"
             "Fresh publication does not guarantee source completeness."

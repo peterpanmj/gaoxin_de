@@ -10,6 +10,11 @@ The product answers a simple business question:
 
 It is designed to show the decisions behind reliable data engineering, not to imitate a full production commerce platform. All demo data is synthetic.
 
+On `codex/pyspark-analytics`, PySpark owns analytical transformations and
+dataset quality checks; staging, Silver, and Gold are Parquet directories.
+This replaces the earlier DuckDB/dbt route. The Click commands and Airflow
+task boundaries remain the operating interface.
+
 ## 2. What a reviewer can see
 
 | Area | What the demo shows | Why it matters |
@@ -18,7 +23,7 @@ It is designed to show the decisions behind reliable data engineering, not to im
 | Data quality | Invalid rows go to quarantine; excessive invalid data blocks the run. | Bad source data cannot silently reach a report. |
 | Safe retries | Exact duplicates are collapsed and same-input retries are safe. | A transient failure does not inflate metrics. |
 | Correct updates | The current version of an order replaces its older version as a complete order plus line set. | A legitimate order update is not mistaken for a duplicate. |
-| Governed publication | dbt tests run in an isolated candidate warehouse before an immutable release is published. | Dashboard users keep the last known-good version when a build fails. |
+| Governed publication | Spark quality checks run against an isolated Parquet candidate before an immutable release is published. | Dashboard users keep the last known-good version when a build fails. |
 | Business consumption | Plotly Dash reports filter by currency, channel, and date. | The outcome is visible to a non-engineering audience. |
 | Operational control | Airflow shows the ordered workflow; GitHub Actions validates pull requests. | The process can be operated and changed with confidence. |
 
@@ -27,8 +32,8 @@ It is designed to show the decisions behind reliable data engineering, not to im
 | User | Need | Product outcome |
 |---|---|---|
 | Business stakeholder | A quick, credible view of daily order activity. | Currency-safe daily metrics in the dashboard. |
-| Analyst | A reliable table to explore and reconcile. | Gold reporting models in DuckDB. |
-| Data engineer | A repeatable, diagnosable pipeline. | Raw snapshots, run metadata, quarantine files, dbt artifacts, and CLI status. |
+| Analyst | A reliable dataset to explore and reconcile. | Gold reporting Parquet datasets. |
+| Data engineer | A repeatable, diagnosable pipeline. | Raw snapshots, run metadata, quarantine files, Spark quality evidence, and CLI status. |
 | Reviewer | Evidence that engineering controls are real. | Rehearsable scenarios for replay, update, invalid input, testing, orchestration, and CI. |
 
 ## 4. Scope and boundaries
@@ -36,9 +41,9 @@ It is designed to show the decisions behind reliable data engineering, not to im
 ### Included
 
 - Saleor GraphQL extraction and local Saleor-shaped mock files.
-- Bronze, Silver, and Gold data layers in a local DuckDB-based warehouse.
+- Bronze JSONL and Spark-built Silver/Gold Parquet data layers.
 - Python validation, normalization, quarantine, and execution control.
-- dbt transformations and data-quality tests.
+- PySpark transformations and data-quality checks.
 - Immutable release publication, a release pointer, and a Plotly Dash dashboard.
 - Airflow orchestration for the local demo and GitHub Actions quality checks.
 
@@ -46,7 +51,7 @@ It is designed to show the decisions behind reliable data engineering, not to im
 
 - Real customer data, production credentials, cloud deployment, or external alert delivery.
 - Log-based CDC, hard-delete capture, or every intermediate source mutation.
-- SCD Type 2 history, multi-writer concurrency, high availability, or a distributed compute engine.
+- SCD Type 2 history, multi-writer concurrency, high availability, or a multi-node Spark cluster.
 - A claim that the complete Saleor plus Airflow stack is validated under a 4 GB Docker limit.
 
 These boundaries are intentional. They keep the demo small enough to explain while leaving a clear path for production evolution.
@@ -58,8 +63,8 @@ flowchart LR
     S[Saleor GraphQL API<br/>or mock JSONL] --> E[Python extraction<br/>and validation]
     E --> B[Bronze snapshots<br/>raw and accepted records]
     E --> Q[Quarantine<br/>invalid records with reasons]
-    B --> W[Candidate DuckDB warehouse]
-    W --> D[dbt Silver and Gold models<br/>plus data tests]
+    B --> W[Candidate Parquet staging]
+    W --> D[PySpark Silver and Gold models<br/>plus quality checks]
     D -->|tests pass| R[Immutable validated release]
     D -->|tests fail| P[Keep prior published release]
     R --> M[current.json release pointer]
@@ -71,6 +76,21 @@ flowchart LR
 
 The flow separates **preparing a candidate** from **publishing a release**. This is the central reliability decision: a failed transformation or test cannot replace what dashboard users already see.
 
+### Processing and storage responsibilities
+
+| Responsibility | Component on this branch |
+|---|---|
+| Capture and normalize source records | Python extraction/ingestion and the controlled order contract. |
+| Stage approved history | PySpark reads accepted Bronze JSONL with an explicit schema and writes Parquet. |
+| Build analytical models | PySpark windowing selects current order versions; line expansion and grouped aggregates produce Silver and Gold. |
+| Validate analytical results | 11 PySpark checks plus checksum-bound candidate/publication evidence. |
+| Store the analytical product | Versioned Parquet directories, release metadata, and an atomic `current.json` pointer. |
+| Serve reports | Dash reads the selected Gold Parquet datasets through pandas/PyArrow without starting Spark. |
+
+`build-warehouse` names the logical analytical product. It does not create a
+DuckDB database or invoke dbt. Spark is the processing engine; Parquet is the
+storage format, and Silver/Gold describe the data's purpose and quality.
+
 ## 6. Data layers and business definitions
 
 | Layer | Contents | Primary audience | Key rule |
@@ -79,7 +99,7 @@ The flow separates **preparing a candidate** from **publishing a release**. This
 | Quarantine | Rejected source records and reason codes. | Data engineering | Keep invalid data out of analytics. |
 | Silver | Current validated order and order-line records. | Analysts and engineers | One current row per order or line in the selected order version. |
 | Gold | Daily order and product metrics. | Analysts and dashboard users | Aggregate only valid, accepted orders. |
-| Release metadata | Checksums, input inventory, dbt results, and timestamps. | Engineers and reviewers | Prove which inputs and tests produced a release. |
+| Release metadata | Checksums, input inventory, Spark check results, and timestamps. | Engineers and reviewers | Prove which inputs and checks produced a release. |
 
 The pipeline preserves the raw API payload in Bronze, then normalizes timestamps, money, strings, nested GraphQL structures, and field names into a controlled Silver contract.
 
@@ -92,8 +112,10 @@ The pipeline preserves the raw API payload in Bronze, then normalizes timestamps
 | Bronze raw capture | `<analytics-root>/bronze/<snapshot-id>/orders.raw.jsonl` | The source record as received, one JSON object per line. |
 | Bronze accepted capture | `<analytics-root>/bronze/<snapshot-id>/orders.accepted.jsonl` | The validated, normalized records used to build the warehouse. |
 | Bronze manifest | `<analytics-root>/bronze/<snapshot-id>/manifest.json` | Record counts, checksums, contract version, and snapshot metadata. |
-| Silver tables | `<analytics-root>/releases/<release-id>/analytics.duckdb` | DuckDB tables `analytics.orders` and `analytics.order_lines`. |
-| Gold tables | `<analytics-root>/releases/<release-id>/analytics.duckdb` | DuckDB tables `analytics.daily_order_metrics` and `analytics.daily_product_metrics`. |
+| Spark staging | `<analytics-root>/releases/<release-id>/dataset/staging/order_versions/` | Parquet approved history used to select current state. |
+| Silver datasets | `<analytics-root>/releases/<release-id>/dataset/silver/` | Parquet `orders/` and `order_lines/`. |
+| Gold datasets | `<analytics-root>/releases/<release-id>/dataset/gold/` | Parquet `daily_order_metrics/` and `daily_product_metrics/`. |
+| Spark quality evidence | `<analytics-root>/releases/<release-id>/quality/results.json` | Named results of the 11 dataset checks. |
 | Active release pointer | `<analytics-root>/warehouse/current.json` | Identifies the validated release served by the dashboard and stores source watermarks. |
 | Review export bundle | `artifacts/<release-id>/` on the host | Default location created by `export-artifacts`; includes one release and its latest source evidence. |
 
@@ -114,7 +136,7 @@ A data contract is the written, testable agreement for a valid order record. It 
 | Same order/version key but different payload | Fail for investigation; never choose a winner based on arrival order. |
 | A newer legitimate order update | Select the whole latest order version and its matching line set. |
 | An older order version arriving late | Retain provenance but do not roll the current analytical state backward. |
-| Build, dbt test, or publication failure | Preserve the previous published release and source checkpoint. |
+| Build, Spark check, or publication failure | Preserve the previous published release and source checkpoint. |
 
 
 
@@ -284,7 +306,7 @@ The project provides a Click CLI called `saleor-analytics`. It is the main local
 | `mock-data` | Generate deterministic Saleor-shaped JSONL for a demo scenario. |
 | `ingest-file` | Validate a JSONL snapshot, save accepted records, quarantine invalid records, and enforce the reject threshold. |
 | `extract-saleor` | Extract paginated data from Saleor’s GraphQL API. |
-| `build-warehouse` | Build a candidate DuckDB warehouse, run dbt, and publish only when validation succeeds. |
+| `build-warehouse` | Build a candidate Parquet release with PySpark and publish only when validation succeeds. |
 | `publish-candidate` | Publish a previously validated candidate after integrity checks. |
 | `status` | Show run, release, freshness, and lineage information. |
 | `dashboard` | Start the local Plotly Dash reporting interface. |
@@ -299,17 +321,32 @@ It permits optional synthetic-data generation only for manual demo runs. Schedul
 
 ## 10. Quality, delivery, and governance
 
-Python handles source interaction, parsing, type checks, normalization, file-level deduplication, quarantine, and workflow control. dbt owns cross-snapshot current-state selection, relational modeling, analytical aggregates, and most data assertions.
+Python handles source interaction, parsing, type checks, normalization, file-level deduplication, quarantine, and workflow control. PySpark owns cross-snapshot current-state selection, relational modeling, analytical aggregates, and 11 quality checks.
 
-The test suite covers Python behavior, dbt builds, publication failure recovery, duplicate handling, update behavior, and invalid inputs. GitHub Actions runs formatting, linting, tests, and packaging for pull requests and the main branch. A manual production-promotion job is illustrative only; repository-level required reviewers and environment protections must be configured separately.
+The test suite covers Python behavior, Spark builds, publication failure recovery, duplicate handling, update behavior, and invalid inputs. GitHub Actions runs formatting, linting, tests, and packaging for pull requests and the main branch. A manual production-promotion job is illustrative only; repository-level required reviewers and environment protections must be configured separately.
 
-The project only uses synthetic data. Credentials are supplied at runtime through environment variables and must not be committed. Local files, DuckDB schemas, and Docker volumes are convenience boundaries, not access-control systems. A production implementation would add IAM, secret management, encrypted storage, retention enforcement, access audits, and alert delivery.
+Developers should run tests in the Linux container on every host OS, including
+Windows. The test target shares the Airflow application's Python/Java/PySpark
+base and adds test tools, with no mounts of presentation data. From the repository
+root in either PowerShell or Git Bash, build successfully and then run:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Rebuild after source/test/dependency changes. See [the testing guide](docs/TESTING.md)
+for expected results and targeted checks. This is developer verification,
+separate from the daily DAG's 11 dataset checks. GitHub Actions currently runs
+directly on Ubuntu; its success is not a Docker image build result.
+
+The project only uses synthetic data. Credentials are supplied at runtime through environment variables and must not be committed. Local Parquet files and Docker volumes are convenience boundaries, not access-control systems. A production implementation would add IAM, secret management, encrypted storage, retention enforcement, access audits, and alert delivery.
 
 ## 11. Why this design is appropriate
 
-DuckDB, Python, dbt, and a local dashboard make the project easy to run on one machine and easy to review. Full rebuilds from retained accepted history are appropriate for the small demo dataset and make corrections and replay straightforward.
+PySpark, Parquet, and a local dashboard make the processing path visible on one machine. Full rebuilds from retained accepted history are appropriate for the small demo dataset and make corrections and replay straightforward. Spark has more startup and memory cost than an embedded database; this branch demonstrates Spark transformations, not a multi-node performance benefit.
 
-The design still demonstrates production-relevant principles: immutable source evidence, contracts, idempotency, isolation before publication, data tests, lineage, orchestration, and controlled delivery. The project avoids adding Spark, Kafka, Iceberg, or cloud services before a business requirement justifies their operational cost.
+The design still demonstrates production-relevant principles: immutable source evidence, contracts, idempotency, isolation before publication, data checks, lineage, orchestration, and controlled delivery. Kafka, Iceberg, and cloud services remain outside the demo.
 
 ## 12. Production evolution
 
@@ -328,9 +365,9 @@ The original Principal Data Engineer Candidate Take Home document is the accepta
 
 | Assessment area | Evidence in this repository |
 |---|---|
-| A. Architecture and design | This document, [README](README.md), [modern demo guide](docs/MODERN_DE_DEMO.md), and `analytics/`. |
+| A. Architecture and design | This document, [README](README.md), [modern demo guide](docs/MODERN_DE_DEMO.md), and `spark_engine.py`. |
 | B. Python programming | `src/saleor_analytics/`, the Click CLI, and `tests/`. |
-| C. Quality and testing | dbt models/tests in `analytics/`, Python tests in `tests/`, quarantine and release evidence under a runtime data root. |
+| C. Quality and testing | Spark checks in `src/saleor_analytics/spark_engine.py`, Python tests in `tests/`, quarantine and release evidence under a runtime data root. |
 | D. Orchestration | [Airflow DAG](dags/saleor_analytics.py) and [Airflow Compose file](infra/airflow/compose.yml). |
 | E. CI/CD | `.github/workflows/` and `.gitlab-ci.yml` as the optional GitLab example. |
 | F. Documentation | [CLI guide](docs/CLI_USER_GUIDE.md), [operations guide](docs/OPERATIONS.md), [verification report](docs/VERIFICATION.md), and this design document. |

@@ -1,8 +1,12 @@
 services:
   airflow:
+    platform: linux/amd64
     build:
       context: ../..
       dockerfile: infra/airflow/Dockerfile
+      target: runtime
+      additional_contexts:
+        python_wheelhouse: ${PYTHON_WHEELHOUSE:-./wheelhouse}
       args:
         HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${BUILD_HTTP_PROXY:-}

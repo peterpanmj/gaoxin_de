@@ -1,26 +1,29 @@
 # Modern data engineering demonstration
 
-This is the current implementation guide. The earlier assessment review is a
-historical gap audit; the changes below address its publication, deduplication,
-malformed-input, reporting and DAG-ordering findings. All data is synthetic.
+This is the implementation guide for `codex/pyspark-analytics`. PySpark replaces
+the earlier DuckDB/dbt analytical path, writes staging/Silver/Gold Parquet, and
+runs dataset checks before publication. Dash reads the published Gold with
+pandas/PyArrow. All data is synthetic. See the current
+[assessment mapping](ASSESSMENT_REVIEW.md) and [verification record](VERIFICATION.md)
+for requirement coverage and the distinction between delivered code and tested runtime.
 
 ## What the demo proves
 
 | Concept | Implementation | Evidence to show |
 |---|---|---|
-| Reliable publication | Immutable DuckDB releases; checksum-bound dbt results; atomic `current.json` | Failed tests or failed pointer replacement preserve the prior release |
+| Reliable publication | Immutable Parquet releases; checksum-bound Spark quality results; atomic `current.json` | Failed checks or failed pointer replacement preserve the prior release |
 | Idempotent processing | Canonical version hash, exact duplicate collapse, same-input retry | Same snapshot retry returns the same manifest; duplicate count is visible |
 | Incremental extraction | Saleor `updatedAt` range, overlap window, publication-bound checkpoint | Initial full load followed by a small/empty delta |
 | Data contracts | Explicit v2 normalization, finite money, nested types, status/timestamps | Invalid records quarantined; equal-version conflicts block publication |
 | Consistent mutable entities | Order ID/version hash selects the entire current line set | Removed lines disappear; older arriving versions do not roll state back |
 | Currency-correct reporting | Currency selector; common channel/date filters | Every chart and KPI uses the same currency and release |
-| Observable data product | Counts, durations, checksums, source inventory, dbt artifacts, status command | Trace release -> snapshots -> raw files; show stale status |
+| Observable data product | Counts, durations, checksums, source inventory, Spark quality evidence, status command | Trace release -> snapshots -> raw files; show stale status |
 | Controlled orchestration | Serial Airflow tasks; manual-only optional mock generation | Generation on/off; failed validation blocks publication |
 | Controlled delivery | GitHub Actions tests/build; illustrative protected promotion job | PR validation and main-only manual promotion example |
 
-Incremental extraction does not imply incremental transformation: dbt still
+Incremental extraction does not imply incremental transformation: Spark still
 rebuilds this small warehouse from retained accepted history. We demonstrate
-idempotent results without claiming SQL MERGE is required. Spark, log-based CDC,
+idempotent results without claiming SQL MERGE is required. A distributed Spark cluster, log-based CDC,
 cloud IAM deployment and SCD2 remain deferred until justified by requirements.
 
 ## Windows network setup with v2rayN
@@ -109,8 +112,20 @@ docker pull busybox:1.36.1
 docker run --rm busybox:1.36.1 echo container-ready
 uv sync --frozen
 uv run saleor-analytics doctor
-uv run pytest -q
 ```
+
+Run the test suite in the Linux container, separately from host connectivity
+checks. The following commands work in both PowerShell and Git Bash; only
+Docker is needed for this test route. Build successfully before running:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Rebuild after source/test/dependency changes. See [the testing guide](TESTING.md)
+for expected results and focused runs. Tests use synthetic inputs and do not
+mount or alter the presentation's data volume.
 
 An unauthenticated registry response of `401` confirms the endpoint responded;
 it does not indicate a failed proxy tunnel. `docker pull` independently checks
@@ -123,6 +138,9 @@ References: [Docker build proxy arguments](https://docs.docker.com/build/buildin
 and [Git proxy configuration](https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpproxy).
 
 ## Quick rehearsal: mock generation, replay and updates
+
+Local PySpark requires Java 17 or later (`java -version`). The Airflow image
+installs its own Java runtime.
 
 Start a fresh root from the repository root to keep the existing demo intact
 and avoid mixing legacy v1 snapshots with the v2 contract.
@@ -214,15 +232,15 @@ not mutate Saleor. It requires `allow_mock=true`, enabled in local demo config.
 
 ## Inspect the current release
 
-Publication writes `warehouse/current.json`, not `warehouse/analytics.duckdb`.
-Use the pointer to locate the immutable database and retained test evidence:
+Publication writes `warehouse/current.json`, not an in-place Parquet overwrite.
+Use the pointer to locate the immutable dataset and retained check evidence:
 
 PowerShell:
 
 ```powershell
 $release = Get-Content "$env:ANALYTICS_ROOT/warehouse/current.json" -Raw | ConvertFrom-Json
 Get-Content "$env:ANALYTICS_ROOT/releases/$($release.release_id)/release.json"
-uv run python -c 'import os,pathlib,duckdb; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_database; p,_=published_database(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); c=duckdb.connect(str(p),read_only=True); print(c.sql("select * from analytics.analytics.daily_order_metrics")); c.close()'
+uv run python -c 'import os,pathlib,pandas as pd; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_dataset; p,_=published_dataset(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); print(pd.read_parquet(p / "gold/daily_order_metrics"))'
 ```
 
 Git Bash:
@@ -230,11 +248,11 @@ Git Bash:
 ```bash
 release_id="$(uv run python -c 'import json,os; print(json.load(open(os.path.join(os.environ["ANALYTICS_ROOT"], "warehouse", "current.json")))["release_id"])')"
 cat "$ANALYTICS_ROOT/releases/$release_id/release.json"
-uv run python -c 'import os,pathlib,duckdb; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_database; p,_=published_database(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); c=duckdb.connect(str(p),read_only=True); print(c.sql("select * from analytics.analytics.daily_order_metrics")); c.close()'
+uv run python -c 'import os,pathlib,pandas as pd; from saleor_analytics.config import Settings; from saleor_analytics.pipeline import published_dataset; p,_=published_dataset(Settings(pathlib.Path(os.environ["ANALYTICS_ROOT"]))); print(pd.read_parquet(p / "gold/daily_order_metrics"))'
 ```
 
 Each release keeps input manifest hashes, contract version, model checksums,
-database checksum, `dbt/run_results.json`, dbt manifest and logs. Silver keeps
+dataset checksum and `quality/results.json`. Silver keeps
 snapshot ID and canonical payload hash. Gold metrics can be traced through their
 date/channel/currency/product grouping keys. Raw/quarantine contain full synthetic
 input and should not be distributed to consumers who only need Gold.
@@ -262,7 +280,7 @@ one invalid row is exactly 5% and partial acceptance is allowed; explain that
 threshold deliberately rather than assuming every rejected row aborts the batch.
 
 Conflicting canonical payloads for the same order ID and source timestamp fail
-even below the reject threshold. Cross-snapshot conflicts fail dbt. To recover
+even below the reject threshold. Cross-snapshot conflicts fail Spark checks. To recover
 from an unpublished bad snapshot without erasing evidence:
 
 This command is the same in PowerShell and Git Bash:
@@ -355,7 +373,7 @@ uv run saleor-analytics build-warehouse --release-id backfill-2026-01-01
 ```
 
 Review the generated `extractions/backfill-2026-01-01/request.json`, Bronze
-manifest, and dbt evidence before treating the release as authoritative. This is
+manifest, and Spark quality evidence before treating the release as authoritative. This is
 an API re-read of the current source filtered by `updatedAt`, not a database
 time-travel query: it cannot restore hard-deleted orders or prove the source's
 exact state at a past instant.
@@ -434,16 +452,18 @@ Retries reuse IDs and artifacts; deterministic validation errors still require
 corrected input/new IDs. Monitoring failure happens after publication and does
 not roll a successful release back.
 
-## Analytical storage and planned Parquet export
+## Analytical storage
 
-Silver and Gold tables use DuckDB native storage. The standalone synthetic
-JSON/Parquet benchmark and its CLI command have been retired. Existing files
-under `var/modern-demo/benchmarks/` are historical, ignored local artifacts;
-the pipeline does not read them.
+PySpark reads accepted Bronze JSONL, writes staging Parquet, selects current
+orders and complete line sets, builds Silver/Gold Parquet, and runs 11 checks.
+Dash uses PyArrow to read the small published Gold datasets. This is a local
+Spark session for an interview demo, not a multi-node performance claim.
 
-A future optional export will use validated warehouse tables and reconcile
-the exported Parquet data with its source release. This is not implemented yet.
-Parquet interoperability alone would not demonstrate Spark execution.
+The existing `build-warehouse` command now creates a Parquet release directory,
+not a `.duckdb` file. `stage-warehouse` and `validate-candidate` invoke PySpark;
+no dbt installation or model execution is needed. Spark check evidence is
+stored in `releases/<release-id>/quality/results.json`, and `warehouse/current.json`
+selects the dataset served by Dash.
 
 ## Schema, history and security boundaries
 
@@ -462,7 +482,7 @@ completeness monitoring remain production design tasks.
 
 ## Delivery and assessment mapping
 
-GitHub Actions runs formatting/lint, Python invariants, fixture-backed dbt
+GitHub Actions runs formatting/lint, Python invariants, fixture-backed Spark
 integration/failure tests and package build. Manual dispatch on main can exercise
 an illustrative `production` environment gate with the same tested artifact.
 Configure required reviewers in repository environment settings; YAML alone does

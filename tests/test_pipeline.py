@@ -1,9 +1,9 @@
-"""Verify ingestion, contracts, DuckDB builds, publication, and artifact export."""
+"""Verify ingestion, contracts, Spark staging, publication, and artifact export."""
 
 import json
 from pathlib import Path
 
-import duckdb
+import pandas as pd
 import pytest
 
 from saleor_analytics.common import atomic_json
@@ -57,9 +57,7 @@ def test_ingestion_quarantines_invalid_rows_and_builds_candidate(tmp_path: Path)
     assert manifest["accepted_count"] == 1
     assert manifest["rejected_count"] == 1
     candidate = build_candidate(settings(tmp_path), "release-001")
-    connection = duckdb.connect(str(candidate), read_only=True)
-    assert connection.execute("select count(*) from stg_order_versions").fetchone()[0] == 1
-    connection.close()
+    assert len(pd.read_parquet(candidate / "staging/order_versions")) == 1
     with pytest.raises(RecordError, match="validated"):
         publish_candidate(settings(tmp_path), candidate)
 
@@ -87,7 +85,8 @@ def test_export_artifacts_copies_release_and_source_evidence(tmp_path: Path):
     (extraction / "request.json").write_text('{"mode": "incremental"}\n')
     release = project.root / "releases" / release_id
     release.mkdir(parents=True)
-    (release / "analytics.duckdb").write_text("demo database")
+    (release / "dataset/gold/daily_order_metrics").mkdir(parents=True)
+    (release / "dataset/gold/daily_order_metrics/part-000.parquet").write_text("example")
     (release / "release.json").write_text(
         json.dumps(
             {
@@ -104,7 +103,9 @@ def test_export_artifacts_copies_release_and_source_evidence(tmp_path: Path):
     result = export_artifacts(project, tmp_path / "exports")
 
     bundle = Path(result["export_directory"])
-    assert (bundle / "releases" / release_id / "analytics.duckdb").exists()
+    assert (
+        bundle / "releases" / release_id / "dataset/gold/daily_order_metrics/part-000.parquet"
+    ).exists()
     assert (bundle / "bronze" / snapshot_id / "orders.raw.jsonl").exists()
     assert (bundle / "quarantine" / snapshot_id / "orders.rejected.jsonl").exists()
     assert (bundle / "extractions" / snapshot_id / "request.json").exists()

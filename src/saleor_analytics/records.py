@@ -2,7 +2,7 @@
 
 The saleor-order-v2 contract is recorded and checked on replay. Unknown fields
 are ignored in normalized output and retained in raw input. Python checks field
-types and supported currencies; dbt checks relational and aggregate invariants.
+types and supported currencies; Spark checks relational and aggregate invariants.
 """
 
 from __future__ import annotations

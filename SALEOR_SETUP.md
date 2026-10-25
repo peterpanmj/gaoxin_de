@@ -2,6 +2,12 @@
 
 The source is the official [Saleor Platform](https://github.com/saleor/saleor-platform) checkout under `infra/saleor-platform` at commit `ab6315bd59c58b4815175df4c679107ff9695be4`.
 
+This source setup is also used by `codex/pyspark-analytics`. Saleor remains the
+operational application; the demo extracts its GraphQL API rather than querying
+its PostgreSQL database. Downstream, PySpark builds Silver/Gold Parquet and Dash
+reads Gold through pandas/PyArrow. See [the design](DEMO_DESIGN.md) for the
+analytical path and [container testing](docs/TESTING.md) for developer checks.
+
 ## Prerequisite
 
 Start Docker Desktop with Linux containers and wait for the engine to become ready. Upstream recommends at least 5 GB of Docker memory. Confirm `docker info` succeeds before pulling images or starting services.
@@ -56,4 +62,7 @@ The upstream Compose image tags are not all immutable digests. The repository co
 
 ## Current verification
 
-Configuration validation does not prove runtime readiness. Startup, authentication and API operations remain pending until the Docker engine is available.
+Configuration validation does not prove runtime readiness. Repeat startup,
+authentication, and API acceptance checks in the presentation environment;
+verify the Spark image and analytical workflow separately. See the
+[current verification record](docs/VERIFICATION.md) for observed and pending results.

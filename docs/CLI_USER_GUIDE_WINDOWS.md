@@ -8,12 +8,21 @@ environment and `saleor-analytics` is the Click CLI.
 The [end-to-end flow diagram](CLI_USER_GUIDE.md#end-to-end-demo-flow) shows
 where mock JSONL and Saleor GraphQL ingestion meet and how a release reaches
 Dash. The [layer results](CLI_USER_GUIDE.md#what-each-layer-produces) section
-explains the Bronze, quarantine, Silver, Gold, and DuckDB outputs for either
+explains the Bronze, quarantine, Silver, Gold, and Parquet outputs for either
 shell.
+
+On `codex/pyspark-analytics`, PySpark replaces the DuckDB/dbt analytical route.
+The existing CLI names now build versioned Silver/Gold Parquet datasets; Dash
+reads Gold through pandas/PyArrow. Spark quality results are retained at
+`releases/<release-id>/quality/results.json` relative to `ANALYTICS_ROOT`.
 
 ## Environment setup
 
-Install Python 3.12, Docker Desktop, and uv. Start Docker Desktop before using
+For tests, use the [Linux container test runner](TESTING.md) and the commands
+below. Only Docker Desktop with Linux containers is required for that route.
+The Python/Java/uv installation in this section is for native host CLI use.
+
+Install Python 3.12, Java 17+, Docker Desktop, and uv. Start Docker Desktop before using
 Compose. If uv is missing, install it with Windows Package Manager:
 
 ```powershell
@@ -23,6 +32,10 @@ winget install --id=astral-sh.uv -e
 Open a new PowerShell terminal after installation. From the repository root,
 verify the tools, install locked dependencies, and check the CLI:
 
+The first sync downloads a large PySpark distribution. Local Spark runs require
+Java 17 or later. On Windows, verify that `JAVA_HOME` points to an existing JDK;
+clear a stale `SPARK_HOME` so PySpark uses its packaged runtime.
+
 ```powershell
 $repoRoot = 'C:\path\to\<repository-folder>'
 Set-Location $repoRoot
@@ -30,12 +43,16 @@ python --version
 uv --version
 docker version
 docker compose version
+java -version
 uv sync --frozen
 uv run saleor-analytics doctor
 ```
 
-Local JSONL ingestion, warehouse builds, and Dash run on the host without
-Docker. For the Airflow DAG, build its image once, then start the service:
+Mock generation and JSONL ingestion run on the host without Docker. Native
+Windows Spark writes also require `winutils.exe` in a valid `HADOOP_HOME\bin`
+for the Hadoop version bundled by PySpark. The Airflow Linux container avoids
+that Windows-only prerequisite and is the recommended presentation route.
+For the Airflow DAG, build its image once, then start the service:
 
 ```powershell
 docker compose -f infra/airflow/compose.yml build
@@ -65,10 +82,28 @@ Use that variable only when the v2rayN listener is running and reachable from
 Docker. See the [network setup](MODERN_DE_DEMO.md#docker-pulls-and-image-builds)
 for the distinction between Docker Desktop pulls and image builds.
 
+## Run tests in the container
+
+From the repository root in PowerShell, with Docker Desktop running:
+
+```powershell
+docker compose -f infra/airflow/compose.test.yml build tests
+if ($LASTEXITCODE -ne 0) { throw 'Test image build failed; inspect the build output.' }
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+if ($LASTEXITCODE -ne 0) { throw 'Tests failed; inspect the pytest output.' }
+```
+
+Expected: `23 passed` and exit code `0`. Tests execute in Linux using the
+image's Python, Java, PySpark, and pytest. You do not need host `JAVA_HOME`,
+`HADOOP_HOME`, or `winutils.exe` for these commands. The disposable test runner
+mounts no demo volumes; its generated data disappears when the container exits.
+Rebuild after source, test, or dependency changes. See [the testing guide](TESTING.md)
+for focused tests, lint checks, and the distinction from daily DAG checks and CI.
+
 ## Mock-data ingestion walkthrough
 
 Use a fresh root for each rehearsal. The commands below create a local JSONL
-file, capture it in Bronze, run dbt, publish a DuckDB release, and start Dash:
+file, capture it in Bronze, run PySpark, publish a Parquet release, and start Dash:
 
 ```powershell
 $demoSession = [guid]::NewGuid().ToString('N')
@@ -138,7 +173,7 @@ and use new snapshot and release IDs for another attempt.
 | `extract-saleor --snapshot-id ID --mode full` | Capture a paginated API snapshot. |
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll source updates since the published checkpoint. |
 | `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read a historical `[start, end)` `updatedAt` interval without moving the checkpoint. |
-| `build-warehouse --release-id ID` | Stage, dbt validate, and publish a release. |
+| `build-warehouse --release-id ID` | Stage, Spark validate, and publish a release. |
 | `stage-warehouse`, `validate-candidate`, `publish-candidate` | Run those release steps separately. |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot. |
 | `status --max-age-hours 24` | Report release and extraction freshness. |
@@ -160,8 +195,8 @@ docker compose -f infra/airflow/compose.yml ps
 docker compose -f infra/airflow/compose.yml exec airflow /opt/analytics/bin/saleor-analytics export-artifacts
 ```
 
-The export does not overwrite an existing bundle. It includes the DuckDB
-release, dbt evidence, and the latest Bronze snapshot.
+The export does not overwrite an existing bundle. It includes the Parquet
+release, Spark quality evidence, and the latest Bronze snapshot.
 
 For a separate dated review copy, pass a destination inside the mapped
 `/opt/artifacts` directory. The bundle then appears under the host's
