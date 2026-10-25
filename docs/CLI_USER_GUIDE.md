@@ -5,7 +5,16 @@ your own clone location, then enter it. The Click entry point is
 `uv run saleor-analytics`. Use `--help` on any command for its assessment
 mapping and parameters. Global `--config PATH` comes before the command.
 
+This guide describes `codex/pyspark-analytics`: PySpark builds and checks the
+analytical datasets, which are stored in Parquet. `build-warehouse` keeps its
+CLI name; it does not create a DuckDB database or run dbt. Dash reads the
+published Gold Parquet through pandas/PyArrow.
+
 ## Environment setup
+
+For tests, use the [Linux container test runner](TESTING.md) and the commands
+below. Only Docker is required for that route. The Python/Java/uv installation
+in this section is for running the CLI directly on the host.
 
 Install Python 3.12, Java 17+, uv, and Docker Desktop, and start Docker Desktop. Check
 that Git Bash can find each tool:
@@ -57,6 +66,22 @@ docker compose -f infra/airflow/compose.yml stop
 If package downloads during image build require the local proxy, see the
 [network setup](MODERN_DE_DEMO.md#docker-pulls-and-image-builds). Docker
 Desktop's image-pull proxy is configured separately.
+
+## Run tests in the container
+
+Use Docker Desktop with Linux containers. From the repository root in Git Bash:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Continue only if the build succeeds. Expected: `23 passed` and exit code `0`.
+The test image supplies Python, Java, PySpark, and pytest; host `winutils.exe`
+and Java configuration are not needed. It mounts no demo volumes and removes
+its temporary test data with the container. Rebuild after code/test/lock changes.
+See [the testing guide](TESTING.md) for focused tests, lint commands, and how
+container verification differs from the daily DAG and Linux CI.
 
 ## Python command runner
 
@@ -163,7 +188,7 @@ can incorporate several accepted snapshots. The walkthrough happens to use
 | Quarantine | `quarantine/<snapshot-id>/orders.rejected.jsonl` | Holds rows that failed the input contract, with rejection details. It can be empty when all rows pass. Excessive rejection fails the ingestion quality gate. |
 | Silver | `releases/<release-id>/dataset/silver/{orders,order_lines}/` Parquet directories | Represents the latest valid version of each order and its matching current line set, with controlled fields and types. This is current state, not one row per historical version. |
 | Gold | `releases/<release-id>/dataset/gold/{daily_order_metrics,daily_product_metrics}/` Parquet directories | Aggregates eligible orders by date, channel, and currency; product metrics also group by SKU/name. Dash reads these datasets with PyArrow. |
-| Published release | `releases/<release-id>/release.json`, `quality/results.json`, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
+| Published release | `releases/<release-id>/release.json`, `releases/<release-id>/quality/results.json`, and `warehouse/current.json` | Records the tested release and points readers to the active one. A failed validation leaves the previous pointer in place. |
 
 For an Airflow run, Compose mounts its named `analytics-data` volume at
 `/opt/data` and sets `ANALYTICS_ROOT=/opt/data`. The paths in the table are
@@ -290,19 +315,24 @@ expected totals.
 | `extract-saleor --snapshot-id ID --mode full` | Bounded paginated API snapshot through the same ingestion contract | A/B/D |
 | `extract-saleor --snapshot-id ID --mode incremental` | Poll changes since published checkpoint, with overlap | A/D |
 | `extract-saleor --snapshot-id ID --mode backfill --start UTC --end UTC` | Re-read an explicit `[start, end)` `updatedAt` interval without moving the incremental watermark | A/B/D |
-| `stage-warehouse --release-id ID` | Build isolated staging tables from approved history | B/D |
+| `stage-warehouse --release-id ID` | Use PySpark to write isolated staging Parquet from approved history | B/D |
 | `validate-candidate DATASET` | Run Spark models/checks and bind retained evidence to the candidate | C/D |
 | `publish-candidate DATASET` | Verify evidence and atomically commit release/checkpoint | C/D |
 | `build-warehouse --release-id ID` | Stage, validate and publish in one command | B/C/D |
 | `exclude-snapshot --snapshot-id ID --reason TEXT` | Audit exclusion of an unpublished bad snapshot | A/C/D |
 | `export-artifacts [DESTINATION] [--release-id ID] [--all-snapshots]` | Copy a release and its latest Bronze, quarantine, extraction, and Spark evidence for review | A/F |
 | `status --max-age-hours 24` | Print release/count/freshness metadata; fail when stale | D/F |
-| `dashboard` | Query Gold with consistent currency/channel/date filters | A/F |
+| `dashboard` | Read Gold Parquet with pandas/PyArrow and apply consistent currency/channel/date filters | A/F |
 
 `build-warehouse --no-publish` validates without changing serving state. Paths for
 explicit validate/publish commands are `ROOT/releases/ID/dataset`.
 Use new release IDs when inputs change. Reusing unchanged IDs is retry-safe.
 A stale candidate cannot replace a newer published release.
+
+Spark dataset check results are in `releases/<release-id>/quality/results.json`;
+there are no dbt model files or dbt test artifacts to inspect on this branch.
+Use [the testing guide](TESTING.md) for pytest results and
+[the verification record](VERIFICATION.md) for executed checks and pending runs.
 
 ## Source, orchestration and troubleshooting
 

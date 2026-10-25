@@ -1,8 +1,11 @@
 # Modern data engineering demonstration
 
-This is the current implementation guide. The earlier assessment review is a
-historical gap audit; the changes below address its publication, deduplication,
-malformed-input, reporting and DAG-ordering findings. All data is synthetic.
+This is the implementation guide for `codex/pyspark-analytics`. PySpark replaces
+the earlier DuckDB/dbt analytical path, writes staging/Silver/Gold Parquet, and
+runs dataset checks before publication. Dash reads the published Gold with
+pandas/PyArrow. All data is synthetic. See the current
+[assessment mapping](ASSESSMENT_REVIEW.md) and [verification record](VERIFICATION.md)
+for requirement coverage and the distinction between delivered code and tested runtime.
 
 ## What the demo proves
 
@@ -109,8 +112,20 @@ docker pull busybox:1.36.1
 docker run --rm busybox:1.36.1 echo container-ready
 uv sync --frozen
 uv run saleor-analytics doctor
-uv run pytest -q
 ```
+
+Run the test suite in the Linux container, separately from host connectivity
+checks. The following commands work in both PowerShell and Git Bash; only
+Docker is needed for this test route. Build successfully before running:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Rebuild after source/test/dependency changes. See [the testing guide](TESTING.md)
+for expected results and focused runs. Tests use synthetic inputs and do not
+mount or alter the presentation's data volume.
 
 An unauthenticated registry response of `401` confirms the endpoint responded;
 it does not indicate a failed proxy tunnel. `docker pull` independently checks
@@ -443,6 +458,12 @@ PySpark reads accepted Bronze JSONL, writes staging Parquet, selects current
 orders and complete line sets, builds Silver/Gold Parquet, and runs 11 checks.
 Dash uses PyArrow to read the small published Gold datasets. This is a local
 Spark session for an interview demo, not a multi-node performance claim.
+
+The existing `build-warehouse` command now creates a Parquet release directory,
+not a `.duckdb` file. `stage-warehouse` and `validate-candidate` invoke PySpark;
+no dbt installation or model execution is needed. Spark check evidence is
+stored in `releases/<release-id>/quality/results.json`, and `warehouse/current.json`
+selects the dataset served by Dash.
 
 ## Schema, history and security boundaries
 

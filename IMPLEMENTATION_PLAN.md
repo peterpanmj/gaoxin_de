@@ -9,6 +9,13 @@ write-up are separate work.
 **Stack:** Saleor-compatible GraphQL extraction, local JSONL mock data, Python,
 Click, PySpark, Parquet, Plotly Dash, Airflow, Docker Compose, uv, and GitHub Actions.
 
+This document describes `codex/pyspark-analytics`. PySpark DataFrame code in
+`spark_engine.py` replaces the former dbt models and DuckDB execution/storage.
+The analytical outputs are Parquet directories; Dash reads Gold through
+pandas/PyArrow. CLI command names and Airflow stage boundaries are retained.
+Implemented behavior and executed runtime evidence are separate; see the
+[current verification record](docs/VERIFICATION.md) for passing and pending checks.
+
 ## 1. Delivered scope
 
 | Area | Status | Delivered behavior | Main evidence |
@@ -70,15 +77,22 @@ The validation strategy is deliberately layered:
 | Operations | `status --max-age-hours 24` reports release/extraction freshness; Airflow records task outcomes and retries. |
 | CI | `ruff format --check`, `ruff check`, pytest, package build, and artifact upload for pull requests and `main`. |
 
-Run the local checks with:
+Run the developer checks inside the Linux test container from the repository
+root. These commands work in PowerShell and Git Bash and need Docker, without
+host Python/Java/Hadoop setup:
 
 ```bash
-uv sync --frozen
-uv run ruff format --check src tests dags
-uv run ruff check src tests dags
-uv run pytest -q
-uv build
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests ruff format --check src tests dags
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests ruff check src tests dags
 ```
+
+Run only after a successful build; rebuild when code or dependencies change.
+The test runner uses disposable temporary data and mounts no demo volumes.
+See [the testing guide](docs/TESTING.md) for expected results and focused runs.
+GitHub Actions runs the suite directly on Ubuntu and additionally builds a
+package; this does not verify a Docker image build.
 
 ## 4. Presentation workflow
 

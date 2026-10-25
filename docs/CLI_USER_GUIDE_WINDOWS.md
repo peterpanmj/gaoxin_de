@@ -11,7 +11,16 @@ Dash. The [layer results](CLI_USER_GUIDE.md#what-each-layer-produces) section
 explains the Bronze, quarantine, Silver, Gold, and Parquet outputs for either
 shell.
 
+On `codex/pyspark-analytics`, PySpark replaces the DuckDB/dbt analytical route.
+The existing CLI names now build versioned Silver/Gold Parquet datasets; Dash
+reads Gold through pandas/PyArrow. Spark quality results are retained at
+`releases/<release-id>/quality/results.json` relative to `ANALYTICS_ROOT`.
+
 ## Environment setup
+
+For tests, use the [Linux container test runner](TESTING.md) and the commands
+below. Only Docker Desktop with Linux containers is required for that route.
+The Python/Java/uv installation in this section is for native host CLI use.
 
 Install Python 3.12, Java 17+, Docker Desktop, and uv. Start Docker Desktop before using
 Compose. If uv is missing, install it with Windows Package Manager:
@@ -72,6 +81,24 @@ docker compose -f infra/airflow/compose.yml build
 Use that variable only when the v2rayN listener is running and reachable from
 Docker. See the [network setup](MODERN_DE_DEMO.md#docker-pulls-and-image-builds)
 for the distinction between Docker Desktop pulls and image builds.
+
+## Run tests in the container
+
+From the repository root in PowerShell, with Docker Desktop running:
+
+```powershell
+docker compose -f infra/airflow/compose.test.yml build tests
+if ($LASTEXITCODE -ne 0) { throw 'Test image build failed; inspect the build output.' }
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+if ($LASTEXITCODE -ne 0) { throw 'Tests failed; inspect the pytest output.' }
+```
+
+Expected: `23 passed` and exit code `0`. Tests execute in Linux using the
+image's Python, Java, PySpark, and pytest. You do not need host `JAVA_HOME`,
+`HADOOP_HOME`, or `winutils.exe` for these commands. The disposable test runner
+mounts no demo volumes; its generated data disappears when the container exits.
+Rebuild after source, test, or dependency changes. See [the testing guide](TESTING.md)
+for focused tests, lint checks, and the distinction from daily DAG checks and CI.
 
 ## Mock-data ingestion walkthrough
 

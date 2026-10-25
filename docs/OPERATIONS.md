@@ -1,5 +1,10 @@
 # Operational design
 
+This runbook describes the PySpark/Parquet branch. Python handles source capture
+and contract normalization; PySpark builds/checks the analytical datasets.
+Silver and Gold are Parquet directories, and Dash reads Gold through
+pandas/PyArrow. The former DuckDB/dbt processing path is retired on this branch.
+
 ## Execution and recovery
 
 Airflow runs `prepare -> extract_and_validate -> stage -> transform_and_test ->
@@ -20,7 +25,9 @@ See [the executable runbook](MODERN_DE_DEMO.md) for commands, Airflow setup,
 parameter examples and failure injection. Source mutations through Saleor API
 are not automated: bootstrap Saleor with its upstream tools or use local mock
 JSONL. A historical Airflow logical date does not reconstruct historical source
-state. Backfill means replaying retained accepted history into a new release.
+state. `extract-saleor --mode backfill --start UTC --end UTC` re-reads an
+explicit `updatedAt` interval without advancing the incremental watermark;
+the subsequent Spark build replays approved history into a new release.
 
 ## Freshness, observability and lineage
 
@@ -29,6 +36,9 @@ duplicate counts, duration and extraction bounds. Releases retain the complete
 input inventory, model checksum, Spark quality results and dataset checksum.
 Silver retains snapshot ID and canonical payload hash. Trace Gold through its
 grouping keys and Spark transformation logic to the selected Silver versions.
+The named dataset checks are retained at
+`releases/<release-id>/quality/results.json`; release metadata binds their
+checksum and the dataset checksum to publication. There is no dbt results file.
 
 The dashboard refreshes every 30 seconds and shows release, publication age and
 quality counts. `status --max-age-hours 24` exits nonzero for stale publication
@@ -71,6 +81,19 @@ usage before promising that limit. No cloud cost estimate is represented as a
 measurement of this local project.
 
 ## CI and promotion
+
+For local developer verification, run tests in the disposable Linux container:
+
+```bash
+docker compose -f infra/airflow/compose.test.yml build tests
+docker compose -f infra/airflow/compose.test.yml run --rm --no-deps tests
+```
+
+Both PowerShell and Git Bash accept these commands. Build successfully first
+and rebuild after changes. This uses temporary synthetic data without mounting
+Airflow's persistent volumes. See [the testing guide](TESTING.md) for results,
+focused runs, and lint commands. Native Windows Hadoop helpers are unnecessary
+for container tests.
 
 GitHub Actions validates PRs and main with formatting, lint, Python tests, real
 Spark integration tests and a built package. An explicit manual workflow input on

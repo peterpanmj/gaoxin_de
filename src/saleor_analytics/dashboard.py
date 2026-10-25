@@ -40,7 +40,7 @@ def filter_report(daily, products, currency, channels, start, end):
 
 
 def create_app(settings: Settings) -> Dash:
-    """Build the Dash application backed by the currently published DuckDB release."""
+    """Build the Dash application backed by the currently published Gold Parquet release."""
     daily, _, _ = load_report(settings)
     currencies = sorted(daily.currency.unique())
     channels = sorted(daily.channel.unique())
