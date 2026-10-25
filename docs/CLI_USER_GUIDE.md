@@ -23,16 +23,20 @@ java -version
 Install the locked Python dependencies and verify the CLI:
 
 The first sync downloads a large PySpark distribution; allow extra time and
-disk space. Local Spark runs require Java 17 or later.
+disk space. Local Spark runs require Java 17 or later. On Windows, verify that
+`JAVA_HOME` points to an existing JDK and clear a stale `SPARK_HOME`.
 
 ```bash
 uv sync --frozen
 uv run saleor-analytics doctor
 ```
 
-Local JSONL ingestion, warehouse builds, and Dash run on the host and do not
-require Docker. To run the Airflow DAG, build its image once and start Compose
-from the repository root:
+Mock generation and JSONL ingestion run on the host without Docker. Native
+Windows Spark writes also require `winutils.exe` in a valid `HADOOP_HOME/bin`
+for the Hadoop version bundled by PySpark. The Airflow Linux container avoids
+that Windows-only prerequisite and is the recommended presentation route.
+To run the Airflow DAG, build its image once and start Compose from the
+repository root:
 
 ```bash
 docker compose -f infra/airflow/compose.yml build

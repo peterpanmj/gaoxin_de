@@ -24,7 +24,8 @@ Open a new PowerShell terminal after installation. From the repository root,
 verify the tools, install locked dependencies, and check the CLI:
 
 The first sync downloads a large PySpark distribution. Local Spark runs require
-Java 17 or later.
+Java 17 or later. On Windows, verify that `JAVA_HOME` points to an existing JDK;
+clear a stale `SPARK_HOME` so PySpark uses its packaged runtime.
 
 ```powershell
 $repoRoot = 'C:\path\to\<repository-folder>'
@@ -38,8 +39,11 @@ uv sync --frozen
 uv run saleor-analytics doctor
 ```
 
-Local JSONL ingestion, warehouse builds, and Dash run on the host without
-Docker. For the Airflow DAG, build its image once, then start the service:
+Mock generation and JSONL ingestion run on the host without Docker. Native
+Windows Spark writes also require `winutils.exe` in a valid `HADOOP_HOME\bin`
+for the Hadoop version bundled by PySpark. The Airflow Linux container avoids
+that Windows-only prerequisite and is the recommended presentation route.
+For the Airflow DAG, build its image once, then start the service:
 
 ```powershell
 docker compose -f infra/airflow/compose.yml build
